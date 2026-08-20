@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.function.Consumer;
+import java.util.function.LongConsumer;
 
 final class LobbyClient implements AutoCloseable {
     private final String host;
@@ -16,17 +17,20 @@ final class LobbyClient implements AutoCloseable {
     private final String playerName;
     private final Consumer<LobbySnapshot> snapshotConsumer;
     private final Consumer<LobbyRunConfig> runConsumer;
+    private final LongConsumer goConsumer;
     private final Consumer<String> statusConsumer;
     private volatile boolean running;
     private Socket socket;
     private DataOutputStream out;
 
-    LobbyClient(String host, int port, String playerName, Consumer<LobbySnapshot> snapshotConsumer, Consumer<LobbyRunConfig> runConsumer, Consumer<String> statusConsumer) {
+    LobbyClient(String host, int port, String playerName, Consumer<LobbySnapshot> snapshotConsumer,
+                Consumer<LobbyRunConfig> runConsumer, LongConsumer goConsumer, Consumer<String> statusConsumer) {
         this.host = host;
         this.port = port;
         this.playerName = playerName;
         this.snapshotConsumer = snapshotConsumer;
         this.runConsumer = runConsumer;
+        this.goConsumer = goConsumer;
         this.statusConsumer = statusConsumer;
     }
 
@@ -56,6 +60,8 @@ final class LobbyClient implements AutoCloseable {
                         snapshotConsumer.accept(LobbyProtocol.readState(in));
                     } else if (message == LobbyProtocol.START_RUN) {
                         runConsumer.accept(LobbyProtocol.readStartRun(in));
+                    } else if (message == LobbyProtocol.GO) {
+                        goConsumer.accept(LobbyProtocol.readGo(in));
                     } else if (message == LobbyProtocol.ERROR) {
                         throw new IOException(in.readUTF());
                     } else {
@@ -73,6 +79,21 @@ final class LobbyClient implements AutoCloseable {
             }
         } finally {
             closeSocket();
+        }
+    }
+
+    void sendReady() {
+        DataOutputStream stream = this.out;
+        if (stream == null) {
+            return;
+        }
+        try {
+            synchronized (stream) {
+                LobbyProtocol.writeReady(stream);
+            }
+            statusConsumer.accept("Мир готов. Ждём остальных игроков");
+        } catch (IOException exception) {
+            statusConsumer.accept("Ошибка READY: " + exception.getMessage());
         }
     }
 
