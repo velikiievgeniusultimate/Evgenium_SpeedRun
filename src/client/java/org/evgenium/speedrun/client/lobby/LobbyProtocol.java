@@ -8,9 +8,10 @@ import java.util.List;
 
 final class LobbyProtocol {
     static final int MAGIC = 0x45565352; // EVSR
-    static final int VERSION = 1;
+    static final int VERSION = 2;
     static final byte STATE = 10;
     static final byte ERROR = 11;
+    static final byte START_RUN = 12;
     static final byte LEAVE = 20;
 
     private LobbyProtocol() {
@@ -40,6 +41,7 @@ final class LobbyProtocol {
 
     static void writeState(DataOutputStream out, LobbySnapshot snapshot) throws IOException {
         out.writeByte(STATE);
+        out.writeBoolean(snapshot.cheatsEnabled());
         out.writeInt(snapshot.players().size());
         for (LobbyPlayer player : snapshot.players()) {
             out.writeUTF(player.name());
@@ -49,6 +51,7 @@ final class LobbyProtocol {
     }
 
     static LobbySnapshot readState(DataInputStream in) throws IOException {
+        boolean cheatsEnabled = in.readBoolean();
         int count = in.readInt();
         if (count < 0 || count > 128) {
             throw new IOException("Некорректный размер лобби");
@@ -57,7 +60,18 @@ final class LobbyProtocol {
         for (int i = 0; i < count; i++) {
             players.add(new LobbyPlayer(in.readUTF(), in.readBoolean()));
         }
-        return new LobbySnapshot(players);
+        return new LobbySnapshot(players, cheatsEnabled);
+    }
+
+    static void writeStartRun(DataOutputStream out, LobbyRunConfig config) throws IOException {
+        out.writeByte(START_RUN);
+        out.writeLong(config.seed());
+        out.writeBoolean(config.cheatsEnabled());
+        out.flush();
+    }
+
+    static LobbyRunConfig readStartRun(DataInputStream in) throws IOException {
+        return new LobbyRunConfig(in.readLong(), in.readBoolean());
     }
 
     static void writeError(DataOutputStream out, String message) throws IOException {
