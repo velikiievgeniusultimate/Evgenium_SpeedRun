@@ -23,13 +23,18 @@ public final class McsrDebugHud {
                     return;
                 }
 
+                List<RngEvent> history = CompetitiveRng.historySnapshot();
                 List<String> lines = new ArrayList<>();
                 lines.add("MCSR DEBUG");
                 lines.add("World Seed: " + RaceSession.worldSeed());
                 lines.add("RNG Seed: " + RaceSession.rngSeed());
                 lines.add("Mode: " + RaceSession.randomizationType().displayName());
                 lines.add("Ruleset: " + McsrRules.rulesetLabel());
-                lines.add("RNG Events: " + CompetitiveRng.totalEvents());
+                lines.add("RNG Events: " + CompetitiveRng.totalEvents() + " • History: " + history.size() + "/" + CompetitiveRng.HISTORY_LIMIT);
+                if (!history.isEmpty()) {
+                    lines.add("Last: " + history.get(history.size() - 1).compactLine());
+                }
+                lines.add("/evsr rng history");
 
                 int width = 0;
                 for (String line : lines) {
