@@ -55,42 +55,17 @@ jobs:
           ASSET="Evgenium_SpeedRun-${TAG}-mc26.2.jar"
           cp "$JAR" "$ASSET"
 
-          cat > release-notes.md <<EOF
-          # Evgenium SpeedRun ${TAG}
-
-          First installable development build of Evgenium SpeedRun.
-
-          ## Requirements
-
-          - Minecraft Java Edition 26.2
-          - Fabric Loader 0.19.3
-          - Fabric API 0.156.0+26.2
-          - Java 25
-
-          ## Included
-
-          - Fabric project foundation and client/common entrypoints
-          - client state model for menu, lobby, match, world and RNG systems
-          - first EvgeniumMainScreen implementation
-          - reproducible GitHub Actions builds
-
-          ## Important
-
-          This is an early alpha foundation. EvgeniumMainScreen exists in the codebase but does not yet replace Minecraft's vanilla title screen. Lobby networking, synchronized starts and competitive RNG are not implemented yet.
-          EOF
-
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "Evgenium SpeedRun ${TAG}" \
-              --notes-file release-notes.md \
               --prerelease
           else
             gh release create "$TAG" "$ASSET" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$RELEASE_TARGET" \
               --title "Evgenium SpeedRun ${TAG}" \
-              --notes-file release-notes.md \
-              --prerelease
+              --prerelease \
+              --generate-notes
           fi
