@@ -5,6 +5,7 @@
   "client": [
     "CreateWorldScreenMixin",
     "PlayerAdvancementsMixin",
+    "ServerLoginPacketListenerMixin",
     "TitleScreenMixin",
     "VanillaRaceChatMixin"
   ],
