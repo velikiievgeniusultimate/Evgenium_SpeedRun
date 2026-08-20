@@ -1,10 +1,13 @@
 package org.evgenium.speedrun.client.lobby;
 
+import net.minecraft.client.Minecraft;
 import org.evgenium.speedrun.EvgeniumSpeedRun;
+import org.evgenium.speedrun.client.match.SpeedrunWorldLauncher;
 import org.evgenium.speedrun.client.runtime.ClientPhase;
 import org.evgenium.speedrun.client.runtime.ClientRuntime;
 
 import java.io.IOException;
+import java.util.concurrent.ThreadLocalRandom;
 
 public final class LobbyService {
     private static final LobbyService INSTANCE = new LobbyService();
@@ -24,10 +27,10 @@ public final class LobbyService {
         return INSTANCE;
     }
 
-    public synchronized String host(int port, String playerName) {
+    public synchronized String host(int port, String playerName, boolean cheatsEnabled) {
         leave();
         try {
-            LobbyHost newHost = new LobbyHost(port, playerName, snapshot -> this.snapshot = snapshot);
+            LobbyHost newHost = new LobbyHost(port, playerName, cheatsEnabled, snapshot -> this.snapshot = snapshot, this::acceptRun);
             newHost.start();
             this.host = newHost;
             this.hosting = true;
@@ -35,7 +38,7 @@ public final class LobbyService {
             this.status = "Лобби открыто. Ожидание игроков";
             this.endpointText = "Адрес в локальной сети: " + NetworkAddresses.bestLocalIpv4() + ":" + port;
             ClientRuntime.transitionTo(ClientPhase.LOBBY);
-            EvgeniumSpeedRun.LOGGER.info("Lobby opened on TCP port {}", port);
+            EvgeniumSpeedRun.LOGGER.info("Lobby opened on TCP port {} (cheats={})", port, cheatsEnabled);
             return null;
         } catch (IOException exception) {
             this.error = true;
@@ -51,9 +54,29 @@ public final class LobbyService {
         this.snapshot = LobbySnapshot.empty();
         this.endpointText = "Хозяин: " + hostName + ":" + port;
         this.status = "Подключение...";
-        this.client = new LobbyClient(hostName, port, playerName, snapshot -> this.snapshot = snapshot, this::acceptClientStatus);
+        this.client = new LobbyClient(hostName, port, playerName, snapshot -> this.snapshot = snapshot, this::acceptRun, this::acceptClientStatus);
         this.client.startAsync();
         ClientRuntime.transitionTo(ClientPhase.LOBBY);
+    }
+
+    public synchronized String startRun() {
+        if (!hosting || host == null) {
+            return "Начать забег может только хозяин лобби";
+        }
+
+        long seed = ThreadLocalRandom.current().nextLong();
+        LobbyRunConfig config = new LobbyRunConfig(seed, snapshot.cheatsEnabled());
+        this.status = "Запуск забега. Seed: " + seed;
+        this.error = false;
+        EvgeniumSpeedRun.LOGGER.info("Starting speedrun with seed {} (cheats={})", seed, config.cheatsEnabled());
+        host.startRun(config);
+        return null;
+    }
+
+    private void acceptRun(LobbyRunConfig config) {
+        this.status = "Создание мира. Seed: " + config.seed();
+        this.error = false;
+        Minecraft.getInstance().execute(() -> SpeedrunWorldLauncher.launch(config));
     }
 
     private void acceptClientStatus(String newStatus) {

@@ -20,15 +20,19 @@ import java.util.function.Consumer;
 final class LobbyHost implements AutoCloseable {
     private final int port;
     private final LobbyPlayer hostPlayer;
+    private final boolean cheatsEnabled;
     private final Consumer<LobbySnapshot> snapshotConsumer;
+    private final Consumer<LobbyRunConfig> runConsumer;
     private final CopyOnWriteArrayList<Peer> peers = new CopyOnWriteArrayList<>();
     private volatile boolean running;
     private ServerSocket serverSocket;
 
-    LobbyHost(int port, String hostName, Consumer<LobbySnapshot> snapshotConsumer) {
+    LobbyHost(int port, String hostName, boolean cheatsEnabled, Consumer<LobbySnapshot> snapshotConsumer, Consumer<LobbyRunConfig> runConsumer) {
         this.port = port;
         this.hostPlayer = new LobbyPlayer(hostName, true);
+        this.cheatsEnabled = cheatsEnabled;
         this.snapshotConsumer = snapshotConsumer;
+        this.runConsumer = runConsumer;
     }
 
     void start() throws IOException {
@@ -92,13 +96,27 @@ final class LobbyHost implements AutoCloseable {
         }
     }
 
+    void startRun(LobbyRunConfig config) {
+        for (Peer peer : peers) {
+            try {
+                peer.sendRun(config);
+            } catch (IOException exception) {
+                try {
+                    peer.socket.close();
+                } catch (IOException ignored) {
+                }
+            }
+        }
+        runConsumer.accept(config);
+    }
+
     private LobbySnapshot snapshot() {
         List<LobbyPlayer> players = new ArrayList<>(peers.size() + 1);
         players.add(hostPlayer);
         for (Peer peer : peers) {
             players.add(new LobbyPlayer(peer.playerName, false));
         }
-        return new LobbySnapshot(players);
+        return new LobbySnapshot(players, cheatsEnabled);
     }
 
     private void publishSnapshot() {
@@ -151,6 +169,10 @@ final class LobbyHost implements AutoCloseable {
 
         private synchronized void send(LobbySnapshot snapshot) throws IOException {
             LobbyProtocol.writeState(out, snapshot);
+        }
+
+        private synchronized void sendRun(LobbyRunConfig config) throws IOException {
+            LobbyProtocol.writeStartRun(out, config);
         }
     }
 }
