@@ -3,13 +3,18 @@
   "package": "org.evgenium.speedrun.client.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "ApplyStatusEffectsConsumeEffectMixin",
     "BonusLevelTableConditionMixin",
     "CreateWorldScreenMixin",
     "EnchantedCountIncreaseFunctionMixin",
+    "EyeOfEnderMixin",
     "HudMixin",
     "PlayerAdvancementsMixin",
     "ServerLoginPacketListenerMixin",
     "SetItemCountFunctionMixin",
+    "SetStewEffectEntryAccessor",
+    "SetStewEffectFunctionMixin",
+    "ThrownEnderpearlMixin",
     "TitleScreenMixin",
     "UniformGeneratorMixin",
     "VanillaRaceChatMixin"
