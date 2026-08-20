@@ -25,10 +25,8 @@ public final class EvgeniumSpeedRunClient implements ClientModInitializer {
             RaceSession.onWorldJoined(client);
             SpectatorRelayClient.onJoinedWorld();
         });
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            RaceSession.tick(client);
-            SpectatorController.tick(client);
-        });
+        ClientTickEvents.START_CLIENT_TICK.register(SpectatorController::tick);
+        ClientTickEvents.END_CLIENT_TICK.register(RaceSession::tick);
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
             if (screen instanceof WinScreen) {
                 RaceSession.onWinScreenOpened();
