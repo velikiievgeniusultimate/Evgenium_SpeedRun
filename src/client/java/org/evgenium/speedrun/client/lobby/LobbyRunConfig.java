@@ -1,7 +1,8 @@
 package org.evgenium.speedrun.client.lobby;
 
 public record LobbyRunConfig(
-    long seed,
+    long worldSeed,
+    long rngSeed,
     boolean cheatsEnabled,
     SpeedrunGoal goal,
     RandomizationType randomizationType

@@ -8,7 +8,7 @@ import java.util.List;
 
 final class LobbyProtocol {
     static final int MAGIC = 0x45565352; // EVSR
-    static final int VERSION = 8;
+    static final int VERSION = 9;
 
     static final byte CHANNEL_CONTROL = 1;
     static final byte CHANNEL_SPECTATOR_SOURCE = 2;
@@ -134,7 +134,8 @@ final class LobbyProtocol {
 
     static void writeStartRun(DataOutputStream out, LobbyRunConfig config) throws IOException {
         out.writeByte(START_RUN);
-        out.writeLong(config.seed());
+        out.writeLong(config.worldSeed());
+        out.writeLong(config.rngSeed());
         out.writeBoolean(config.cheatsEnabled());
         out.writeUTF(config.goal().id());
         out.writeUTF(config.randomizationType().id());
@@ -142,12 +143,13 @@ final class LobbyProtocol {
     }
 
     static LobbyRunConfig readStartRun(DataInputStream in) throws IOException {
-        long seed = in.readLong();
+        long worldSeed = in.readLong();
+        long rngSeed = in.readLong();
         boolean cheatsEnabled = in.readBoolean();
         try {
             SpeedrunGoal goal = SpeedrunGoal.fromId(in.readUTF());
             RandomizationType randomizationType = RandomizationType.fromId(in.readUTF());
-            return new LobbyRunConfig(seed, cheatsEnabled, goal, randomizationType);
+            return new LobbyRunConfig(worldSeed, rngSeed, cheatsEnabled, goal, randomizationType);
         } catch (IllegalArgumentException exception) {
             throw new IOException(exception.getMessage(), exception);
         }

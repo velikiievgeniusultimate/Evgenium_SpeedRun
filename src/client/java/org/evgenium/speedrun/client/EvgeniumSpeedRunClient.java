@@ -10,6 +10,8 @@ import org.evgenium.speedrun.client.match.RaceNotificationHud;
 import org.evgenium.speedrun.client.match.RacePauseController;
 import org.evgenium.speedrun.client.match.RaceSession;
 import org.evgenium.speedrun.client.match.SpeedrunTimerHud;
+import org.evgenium.speedrun.client.mcsr.McsrDebugCommands;
+import org.evgenium.speedrun.client.mcsr.McsrDebugHud;
 import org.evgenium.speedrun.client.spectator.SpectatorController;
 import org.evgenium.speedrun.client.spectator.SpectatorOneSlotHud;
 import org.evgenium.speedrun.client.spectator.SpectatorRelayClient;
@@ -23,6 +25,8 @@ public final class EvgeniumSpeedRunClient implements ClientModInitializer {
         SpeedrunTimerHud.install();
         RaceNotificationHud.install();
         SpectatorOneSlotHud.install();
+        McsrDebugHud.install();
+        McsrDebugCommands.install();
 
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
             RaceSession.onWorldJoined(client);
