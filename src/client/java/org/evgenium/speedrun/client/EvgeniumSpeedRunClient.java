@@ -6,8 +6,11 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.gui.screens.WinScreen;
 import org.evgenium.speedrun.EvgeniumSpeedRun;
+import org.evgenium.speedrun.client.match.RaceNotificationHud;
 import org.evgenium.speedrun.client.match.RaceSession;
 import org.evgenium.speedrun.client.match.SpeedrunTimerHud;
+import org.evgenium.speedrun.client.spectator.SpectatorController;
+import org.evgenium.speedrun.client.spectator.SpectatorRelayClient;
 import org.evgenium.speedrun.client.ui.MenuRouter;
 
 public final class EvgeniumSpeedRunClient implements ClientModInitializer {
@@ -16,8 +19,13 @@ public final class EvgeniumSpeedRunClient implements ClientModInitializer {
         org.evgenium.speedrun.client.runtime.ClientRuntime.initialize();
         MenuRouter.install();
         SpeedrunTimerHud.install();
+        RaceNotificationHud.install();
 
-        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> RaceSession.onWorldJoined(client));
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+            RaceSession.onWorldJoined(client);
+            SpectatorRelayClient.onJoinedWorld();
+        });
+        ClientTickEvents.START_CLIENT_TICK.register(SpectatorController::tick);
         ClientTickEvents.END_CLIENT_TICK.register(RaceSession::tick);
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
             if (screen instanceof WinScreen) {

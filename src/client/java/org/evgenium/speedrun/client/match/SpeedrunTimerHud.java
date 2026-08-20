@@ -15,7 +15,7 @@ public final class SpeedrunTimerHud {
         HudElementRegistry.addLast(
             Identifier.fromNamespaceAndPath(EvgeniumSpeedRun.MOD_ID, "speedrun_timer"),
             (graphics, deltaTracker) -> {
-                if (!RaceSession.isRunning() || Minecraft.getInstance().level == null) {
+                if (!RaceSession.shouldShowTimer() || Minecraft.getInstance().level == null) {
                     return;
                 }
 
