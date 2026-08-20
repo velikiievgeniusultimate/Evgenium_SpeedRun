@@ -61,7 +61,7 @@ public final class LobbyRoomScreen extends Screen {
         String endpoint = service.endpointText();
         graphics.text(this.font, endpoint, (this.width - this.font.width(endpoint)) / 2, 40, 0xFFBBBBBB, false);
 
-        String baseRules = "Survival • Easy";
+        String baseRules = "Survival • Easy • Рандом: " + snapshot.randomizationType().displayName();
         graphics.text(this.font, baseRules, (this.width - this.font.width(baseRules)) / 2, 56, 0xFFAAAAAA, false);
 
         String selectedRules = "Цель: " + snapshot.goal().displayName()
