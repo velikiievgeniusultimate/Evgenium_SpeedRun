@@ -8,12 +8,18 @@ import java.util.List;
 
 final class LobbyProtocol {
     static final int MAGIC = 0x45565352; // EVSR
-    static final int VERSION = 4;
+    static final int VERSION = 5;
+
+    static final byte CHANNEL_CONTROL = 1;
+    static final byte CHANNEL_SPECTATOR_SOURCE = 2;
+    static final byte CHANNEL_SPECTATOR_TARGET = 3;
+
     static final byte STATE = 10;
     static final byte ERROR = 11;
     static final byte START_RUN = 12;
     static final byte GO = 13;
-    static final byte RACE_FINISHED = 14;
+    static final byte FINISH_UPDATE = 14;
+    static final byte OPEN_SPECTATOR_TUNNEL = 15;
     static final byte LEAVE = 20;
     static final byte READY = 21;
     static final byte FINISH = 22;
@@ -22,21 +28,60 @@ final class LobbyProtocol {
     }
 
     static void writeHello(DataOutputStream out, String playerName) throws IOException {
-        out.writeInt(MAGIC);
-        out.writeInt(VERSION);
+        writeHeader(out, CHANNEL_CONTROL);
         out.writeUTF(playerName);
         out.flush();
     }
 
-    static String readHello(DataInputStream in) throws IOException {
+    static void writeSpectatorSourceHello(DataOutputStream out, String spectatorName, String targetName) throws IOException {
+        writeHeader(out, CHANNEL_SPECTATOR_SOURCE);
+        out.writeUTF(spectatorName);
+        out.writeUTF(targetName);
+        out.flush();
+    }
+
+    static void writeSpectatorTargetHello(DataOutputStream out, long tunnelId) throws IOException {
+        writeHeader(out, CHANNEL_SPECTATOR_TARGET);
+        out.writeLong(tunnelId);
+        out.flush();
+    }
+
+    private static void writeHeader(DataOutputStream out, byte channel) throws IOException {
+        out.writeInt(MAGIC);
+        out.writeInt(VERSION);
+        out.writeByte(channel);
+    }
+
+    static ConnectionHello readConnectionHello(DataInputStream in) throws IOException {
         if (in.readInt() != MAGIC) {
-            throw new IOException("Это не Evgenium SpeedRun lobby");
+            throw new IOException("Это не Evgenium SpeedRun соединение");
         }
         int version = in.readInt();
         if (version != VERSION) {
             throw new IOException("Несовместимая версия протокола: " + version);
         }
-        String name = in.readUTF().trim();
+        byte channel = in.readByte();
+        if (channel == CHANNEL_CONTROL) {
+            String name = validatePlayerName(in.readUTF());
+            return new ConnectionHello(channel, name, null, -1L);
+        }
+        if (channel == CHANNEL_SPECTATOR_SOURCE) {
+            String spectatorName = validatePlayerName(in.readUTF());
+            String targetName = validatePlayerName(in.readUTF());
+            return new ConnectionHello(channel, spectatorName, targetName, -1L);
+        }
+        if (channel == CHANNEL_SPECTATOR_TARGET) {
+            long tunnelId = in.readLong();
+            if (tunnelId <= 0L) {
+                throw new IOException("Некорректный tunnel id");
+            }
+            return new ConnectionHello(channel, null, null, tunnelId);
+        }
+        throw new IOException("Неизвестный тип соединения: " + channel);
+    }
+
+    private static String validatePlayerName(String raw) throws IOException {
+        String name = raw.trim();
         if (name.isEmpty() || name.length() > 32) {
             throw new IOException("Некорректное имя игрока");
         }
@@ -121,26 +166,43 @@ final class LobbyProtocol {
         return elapsedMillis;
     }
 
-    static void writeRaceFinished(DataOutputStream out, LobbyRaceResult result) throws IOException {
-        out.writeByte(RACE_FINISHED);
-        out.writeUTF(result.winnerName());
+    static void writeFinishUpdate(DataOutputStream out, LobbyRaceResult result) throws IOException {
+        out.writeByte(FINISH_UPDATE);
+        out.writeUTF(result.playerName());
+        out.writeInt(result.place());
         out.writeLong(result.elapsedMillis());
+        out.writeInt(result.totalPlayers());
         out.flush();
     }
 
-    static LobbyRaceResult readRaceFinished(DataInputStream in) throws IOException {
-        String winnerName = in.readUTF();
-        long elapsedMillis = in.readLong();
+    static LobbyRaceResult readFinishUpdate(DataInputStream in) throws IOException {
         try {
-            return new LobbyRaceResult(winnerName, elapsedMillis);
+            return new LobbyRaceResult(in.readUTF(), in.readInt(), in.readLong(), in.readInt());
         } catch (IllegalArgumentException exception) {
-            throw new IOException("Некорректный результат гонки", exception);
+            throw new IOException("Некорректный результат финиша", exception);
         }
+    }
+
+    static void writeOpenSpectatorTunnel(DataOutputStream out, long tunnelId) throws IOException {
+        out.writeByte(OPEN_SPECTATOR_TUNNEL);
+        out.writeLong(tunnelId);
+        out.flush();
+    }
+
+    static long readOpenSpectatorTunnel(DataInputStream in) throws IOException {
+        long tunnelId = in.readLong();
+        if (tunnelId <= 0L) {
+            throw new IOException("Некорректный tunnel id");
+        }
+        return tunnelId;
     }
 
     static void writeError(DataOutputStream out, String message) throws IOException {
         out.writeByte(ERROR);
         out.writeUTF(message);
         out.flush();
+    }
+
+    record ConnectionHello(byte channel, String playerName, String targetName, long tunnelId) {
     }
 }
