@@ -3,6 +3,7 @@
   "package": "org.evgenium.speedrun.client.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "CreateWorldScreenMixin",
     "TitleScreenMixin"
   ],
   "injectors": {
