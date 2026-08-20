@@ -31,8 +31,8 @@ public final class RaceSession {
     private static volatile boolean running;
     private static volatile boolean finishReported;
     private static volatile boolean localFinished;
+    /** Authoritative epoch timestamp on the lobby host's time axis. */
     private static volatile long goAtEpochMillis = -1L;
-    private static volatile long startNanoTime = -1L;
     private static volatile long finalElapsedNanos = -1L;
     private static volatile int localPlace = -1;
 
@@ -53,7 +53,6 @@ public final class RaceSession {
         finishReported = false;
         localFinished = false;
         goAtEpochMillis = -1L;
-        startNanoTime = -1L;
         finalElapsedNanos = -1L;
         localPlace = -1;
 
@@ -64,6 +63,10 @@ public final class RaceSession {
             randomizationType.id(),
             cheatsEnabled
         );
+    }
+
+    public static boolean matchesConfig(LobbyRunConfig other) {
+        return config != null && config.equals(other);
     }
 
     public static void onWorldJoined(Minecraft minecraft) {
@@ -100,7 +103,6 @@ public final class RaceSession {
         player.connection.teleport(x, y, z, 0.0F, 0.0F);
         EvgeniumSpeedRun.LOGGER.info("Normalized speedrun spawn to {}, {}, {}", x, y, z);
 
-        // READY is delayed until the integrated server has been published for spectator relay.
         minecraft.execute(() -> SpectatorRelayClient.prepareLocalRunnerWorld(RaceSession::reportReady));
     }
 
@@ -113,10 +115,32 @@ public final class RaceSession {
     }
 
     public static void scheduleGo(long startAtEpochMillis) {
-        if (config == null) {
+        if (config == null || localFinished) {
             return;
         }
         goAtEpochMillis = startAtEpochMillis;
+        if (!running) {
+            waitingForGo = true;
+        }
+    }
+
+    /** Re-applies the host's authoritative GO timestamp after a control-channel reconnect. */
+    public static void resynchronizeGo(long startAtEpochMillis) {
+        if (config == null || localFinished) {
+            return;
+        }
+        goAtEpochMillis = startAtEpochMillis;
+        if (!running) {
+            waitingForGo = true;
+        }
+    }
+
+    /** Host says the run is still only in PREPARING state after reconnect. */
+    public static void clearGoWhilePreparing() {
+        if (running || localFinished) {
+            return;
+        }
+        goAtEpochMillis = -1L;
         waitingForGo = true;
     }
 
@@ -125,13 +149,19 @@ public final class RaceSession {
             return;
         }
 
-        if (System.currentTimeMillis() < goAtEpochMillis) {
+        if (RaceClockSync.hostNowMillis() < goAtEpochMillis) {
+            return;
+        }
+
+        // If the GO packet arrived immediately before the VPN/control channel died, do not let
+        // the runner move until host-time synchronization is healthy again. The eventual timer
+        // still uses the original GO epoch, so reconnecting never grants free paused race time.
+        if (!RaceClockSync.isSafe()) {
             return;
         }
 
         waitingForGo = false;
         running = true;
-        startNanoTime = System.nanoTime();
         ClientRuntime.transitionTo(ClientPhase.RUNNING);
 
         if (minecraft.gui.screen() instanceof RaceWaitingScreen) {
@@ -195,7 +225,6 @@ public final class RaceSession {
                 if (player == null) {
                     return;
                 }
-
                 player.getInventory().clearContent();
                 player.setGameMode(GameType.SPECTATOR);
             });
@@ -236,11 +265,15 @@ public final class RaceSession {
         return goAtEpochMillis > 0L;
     }
 
+    public static long goAtEpochMillis() {
+        return goAtEpochMillis;
+    }
+
     public static long countdownMillis() {
         if (goAtEpochMillis <= 0L) {
             return -1L;
         }
-        return Math.max(0L, goAtEpochMillis - System.currentTimeMillis());
+        return Math.max(0L, goAtEpochMillis - RaceClockSync.hostNowMillis());
     }
 
     public static boolean isRunning() {
@@ -263,10 +296,11 @@ public final class RaceSession {
         if (localFinished && finalElapsedNanos >= 0L) {
             return finalElapsedNanos;
         }
-        if (!running || startNanoTime <= 0L) {
+        if (!running || goAtEpochMillis <= 0L) {
             return 0L;
         }
-        return Math.max(0L, System.nanoTime() - startNanoTime);
+        long goNanos = goAtEpochMillis * 1_000_000L;
+        return Math.max(0L, RaceClockSync.hostNowNanos() - goNanos);
     }
 
     private static String formatMillis(long totalMillis) {
