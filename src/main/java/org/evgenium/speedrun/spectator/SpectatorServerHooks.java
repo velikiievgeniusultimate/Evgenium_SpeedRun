@@ -14,6 +14,8 @@ public final class SpectatorServerHooks {
                 return;
             }
             player.getInventory().clearContent();
+            player.getInventory().setItem(0, SpectatorItems.createSelector());
+            player.getInventory().setSelectedSlot(0);
         });
     }
 }
