@@ -15,16 +15,18 @@ final class LobbyClient implements AutoCloseable {
     private final int port;
     private final String playerName;
     private final Consumer<LobbySnapshot> snapshotConsumer;
+    private final Consumer<LobbyRunConfig> runConsumer;
     private final Consumer<String> statusConsumer;
     private volatile boolean running;
     private Socket socket;
     private DataOutputStream out;
 
-    LobbyClient(String host, int port, String playerName, Consumer<LobbySnapshot> snapshotConsumer, Consumer<String> statusConsumer) {
+    LobbyClient(String host, int port, String playerName, Consumer<LobbySnapshot> snapshotConsumer, Consumer<LobbyRunConfig> runConsumer, Consumer<String> statusConsumer) {
         this.host = host;
         this.port = port;
         this.playerName = playerName;
         this.snapshotConsumer = snapshotConsumer;
+        this.runConsumer = runConsumer;
         this.statusConsumer = statusConsumer;
     }
 
@@ -52,6 +54,8 @@ final class LobbyClient implements AutoCloseable {
                     byte message = in.readByte();
                     if (message == LobbyProtocol.STATE) {
                         snapshotConsumer.accept(LobbyProtocol.readState(in));
+                    } else if (message == LobbyProtocol.START_RUN) {
+                        runConsumer.accept(LobbyProtocol.readStartRun(in));
                     } else if (message == LobbyProtocol.ERROR) {
                         throw new IOException(in.readUTF());
                     } else {
