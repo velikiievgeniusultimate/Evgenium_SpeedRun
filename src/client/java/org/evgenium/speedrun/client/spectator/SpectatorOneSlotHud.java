@@ -14,9 +14,13 @@ import org.evgenium.speedrun.spectator.SpectatorItems;
  * We keep the real server-side game mode SPECTATOR so all vanilla spectator behaviour and
  * protections remain intact. Vanilla spectator hides the normal inventory/hotbar, therefore
  * this HUD supplies exactly one virtual slot containing the Evgenium player selector.
+ *
+ * Important: the selector ItemStack is created lazily. Minecraft 26.2 installs client
+ * entrypoints before item component holders are fully bound, so constructing an ItemStack in
+ * this class' static initializer crashes startup with "Components not bound yet".
  */
 public final class SpectatorOneSlotHud {
-    private static final ItemStack SELECTOR = SpectatorItems.createSelector();
+    private static ItemStack selector;
 
     private SpectatorOneSlotHud() {
     }
@@ -33,6 +37,12 @@ public final class SpectatorOneSlotHud {
                     return;
                 }
 
+                ItemStack selectorStack = selector;
+                if (selectorStack == null) {
+                    selectorStack = SpectatorItems.createSelector();
+                    selector = selectorStack;
+                }
+
                 int slotSize = 24;
                 int x = (graphics.guiWidth() - slotSize) / 2;
                 int y = graphics.guiHeight() - 30;
@@ -41,7 +51,7 @@ public final class SpectatorOneSlotHud {
                 graphics.fill(x, y, x + slotSize, y + slotSize, 0xCC202020);
                 graphics.outline(x, y, slotSize, slotSize, 0xFFFFFFFF);
                 graphics.outline(x + 2, y + 2, slotSize - 4, slotSize - 4, 0xFF8A8A8A);
-                graphics.item(SELECTOR, x + 4, y + 4);
+                graphics.item(selectorStack, x + 4, y + 4);
 
                 String hint = "ПКМ — выбрать игрока";
                 int hintX = (graphics.guiWidth() - minecraft.font.width(hint)) / 2;
