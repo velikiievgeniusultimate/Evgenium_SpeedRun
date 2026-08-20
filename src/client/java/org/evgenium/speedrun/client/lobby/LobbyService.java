@@ -2,6 +2,7 @@ package org.evgenium.speedrun.client.lobby;
 
 import net.minecraft.client.Minecraft;
 import org.evgenium.speedrun.EvgeniumSpeedRun;
+import org.evgenium.speedrun.client.match.RaceSession;
 import org.evgenium.speedrun.client.match.SpeedrunWorldLauncher;
 import org.evgenium.speedrun.client.runtime.ClientPhase;
 import org.evgenium.speedrun.client.runtime.ClientRuntime;
@@ -30,7 +31,7 @@ public final class LobbyService {
     public synchronized String host(int port, String playerName, boolean cheatsEnabled) {
         leave();
         try {
-            LobbyHost newHost = new LobbyHost(port, playerName, cheatsEnabled, snapshot -> this.snapshot = snapshot, this::acceptRun);
+            LobbyHost newHost = new LobbyHost(port, playerName, cheatsEnabled, snapshot -> this.snapshot = snapshot, this::acceptRun, this::acceptGo);
             newHost.start();
             this.host = newHost;
             this.hosting = true;
@@ -54,7 +55,7 @@ public final class LobbyService {
         this.snapshot = LobbySnapshot.empty();
         this.endpointText = "Хозяин: " + hostName + ":" + port;
         this.status = "Подключение...";
-        this.client = new LobbyClient(hostName, port, playerName, snapshot -> this.snapshot = snapshot, this::acceptRun, this::acceptClientStatus);
+        this.client = new LobbyClient(hostName, port, playerName, snapshot -> this.snapshot = snapshot, this::acceptRun, this::acceptGo, this::acceptClientStatus);
         this.client.startAsync();
         ClientRuntime.transitionTo(ClientPhase.LOBBY);
     }
@@ -66,9 +67,9 @@ public final class LobbyService {
 
         long seed = ThreadLocalRandom.current().nextLong();
         LobbyRunConfig config = new LobbyRunConfig(seed, snapshot.cheatsEnabled());
-        this.status = "Запуск забега. Seed: " + seed;
+        this.status = "Создание миров. Seed: " + seed;
         this.error = false;
-        EvgeniumSpeedRun.LOGGER.info("Starting speedrun with seed {} (cheats={})", seed, config.cheatsEnabled());
+        EvgeniumSpeedRun.LOGGER.info("Preparing synchronized speedrun with seed {} (cheats={})", seed, config.cheatsEnabled());
         host.startRun(config);
         return null;
     }
@@ -77,6 +78,22 @@ public final class LobbyService {
         this.status = "Создание мира. Seed: " + config.seed();
         this.error = false;
         Minecraft.getInstance().execute(() -> SpeedrunWorldLauncher.launch(config));
+    }
+
+    public synchronized void reportWorldReady() {
+        this.status = "Мир готов. Ждём остальных игроков";
+        this.error = false;
+        if (hosting && host != null) {
+            host.markHostReady();
+        } else if (client != null) {
+            client.sendReady();
+        }
+    }
+
+    private void acceptGo(long startAtEpochMillis) {
+        this.status = "Все готовы. Старт!";
+        this.error = false;
+        Minecraft.getInstance().execute(() -> RaceSession.scheduleGo(startAtEpochMillis));
     }
 
     private void acceptClientStatus(String newStatus) {

@@ -22,6 +22,7 @@ public final class SpeedrunWorldLauncher {
             return;
         }
 
+        RaceSession.arm(config);
         ClientRuntime.transitionTo(ClientPhase.PREPARING_WORLD);
         CreateWorldScreen.openFresh(minecraft, () -> {
             PENDING.compareAndSet(request, null);

@@ -8,11 +8,13 @@ import java.util.List;
 
 final class LobbyProtocol {
     static final int MAGIC = 0x45565352; // EVSR
-    static final int VERSION = 2;
+    static final int VERSION = 3;
     static final byte STATE = 10;
     static final byte ERROR = 11;
     static final byte START_RUN = 12;
+    static final byte GO = 13;
     static final byte LEAVE = 20;
+    static final byte READY = 21;
 
     private LobbyProtocol() {
     }
@@ -72,6 +74,21 @@ final class LobbyProtocol {
 
     static LobbyRunConfig readStartRun(DataInputStream in) throws IOException {
         return new LobbyRunConfig(in.readLong(), in.readBoolean());
+    }
+
+    static void writeReady(DataOutputStream out) throws IOException {
+        out.writeByte(READY);
+        out.flush();
+    }
+
+    static void writeGo(DataOutputStream out, long startAtEpochMillis) throws IOException {
+        out.writeByte(GO);
+        out.writeLong(startAtEpochMillis);
+        out.flush();
+    }
+
+    static long readGo(DataInputStream in) throws IOException {
+        return in.readLong();
     }
 
     static void writeError(DataOutputStream out, String message) throws IOException {
