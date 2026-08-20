@@ -5,8 +5,8 @@
   "client": [
     "CreateWorldScreenMixin",
     "PlayerAdvancementsMixin",
-    "PlayerListRaceSilenceMixin",
-    "TitleScreenMixin"
+    "TitleScreenMixin",
+    "VanillaRaceChatMixin"
   ],
   "injectors": {
     "defaultRequire": 1
