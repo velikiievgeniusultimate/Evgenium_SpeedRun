@@ -3,7 +3,7 @@
   "id": "evgenium_speedrun",
   "version": "${version}",
   "name": "Evgenium SpeedRun",
-  "description": "Competitive Minecraft speedrunning client with lobbies, synchronized starts and controlled match rules.",
+  "description": "Competitive Minecraft speedrunning client with direct-connect lobbies, synchronized starts and controlled match rules.",
   "authors": [
     "Evgenium"
   ],
@@ -19,6 +19,12 @@
       "org.evgenium.speedrun.client.EvgeniumSpeedRunClient"
     ]
   },
+  "mixins": [
+    {
+      "config": "evgenium_speedrun.client.mixins.json",
+      "environment": "client"
+    }
+  ],
   "depends": {
     "fabricloader": ">=0.19.3",
     "minecraft": "~26.2",
