@@ -152,18 +152,26 @@ public final class LobbyService {
         }
 
         results.clear();
-        long seed = ThreadLocalRandom.current().nextLong();
+        long worldSeed = ThreadLocalRandom.current().nextLong();
+
+        // Foundation rule: RNG seed is a separate protocol/session field from day one,
+        // but ruleset R1 intentionally initializes it to the world seed. Later stages may
+        // choose an independent value without another structural rewrite.
+        long rngSeed = worldSeed;
+
         LobbyRunConfig config = new LobbyRunConfig(
-            seed,
+            worldSeed,
+            rngSeed,
             snapshot.cheatsEnabled(),
             snapshot.goal(),
             snapshot.randomizationType()
         );
-        this.status = "Создание миров. Seed: " + seed;
+        this.status = "Создание миров. World Seed: " + worldSeed;
         this.error = false;
         EvgeniumSpeedRun.LOGGER.info(
-            "Preparing synchronized speedrun with seed {} (goal={}, cheats={}, randomization={})",
-            seed,
+            "Preparing synchronized speedrun worldSeed={} rngSeed={} (goal={}, cheats={}, randomization={})",
+            worldSeed,
+            rngSeed,
             config.goal().id(),
             config.cheatsEnabled(),
             config.randomizationType().id()
@@ -174,7 +182,7 @@ public final class LobbyService {
 
     private void acceptRun(LobbyRunConfig config) {
         results.clear();
-        this.status = "Создание мира. Seed: " + config.seed();
+        this.status = "Создание мира. World Seed: " + config.worldSeed() + " • RNG Seed: " + config.rngSeed();
         this.error = false;
         Minecraft.getInstance().execute(() -> SpeedrunWorldLauncher.launch(config));
     }
