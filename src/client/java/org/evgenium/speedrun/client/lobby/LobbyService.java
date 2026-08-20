@@ -26,6 +26,7 @@ public final class LobbyService {
     private volatile String endpointText = "";
     private volatile int lobbyPort = -1;
     private volatile String remoteLobbyHost = "";
+    private volatile RandomizationType configuredRandomizationType = RandomizationType.MCSR_LIKE;
     private LobbyHost host;
     private LobbyClient client;
 
@@ -59,7 +60,12 @@ public final class LobbyService {
             this.status = "Лобби открыто. Ожидание игроков";
             this.endpointText = "Адрес в локальной сети: " + NetworkAddresses.bestLocalIpv4() + ":" + port;
             ClientRuntime.transitionTo(ClientPhase.LOBBY);
-            EvgeniumSpeedRun.LOGGER.info("Lobby opened on TCP port {} (cheats={})", port, cheatsEnabled);
+            EvgeniumSpeedRun.LOGGER.info(
+                "Lobby opened on TCP port {} (cheats={}, randomization={})",
+                port,
+                cheatsEnabled,
+                configuredRandomizationType.id()
+            );
             return null;
         } catch (IOException exception) {
             this.error = true;
@@ -117,6 +123,29 @@ public final class LobbyService {
         return null;
     }
 
+    public synchronized String setRandomizationType(RandomizationType type) {
+        if (!hosting || host == null) {
+            return "Менять рандомизацию может только хозяин лобби";
+        }
+        RandomizationType previous = configuredRandomizationType;
+        configuredRandomizationType = type == null ? RandomizationType.MCSR_LIKE : type;
+
+        // Re-publish the host snapshot through the existing pre-run rules path.
+        // LobbyHost's 3-argument LobbySnapshot constructor reads configuredRandomizationType().
+        if (!host.setGoal(snapshot.goal())) {
+            configuredRandomizationType = previous;
+            return "Нельзя менять рандомизацию после начала подготовки забега";
+        }
+
+        this.status = "Рандомизация: " + configuredRandomizationType.displayName();
+        this.error = false;
+        return null;
+    }
+
+    RandomizationType configuredRandomizationType() {
+        return configuredRandomizationType;
+    }
+
     public synchronized String startRun() {
         if (!hosting || host == null) {
             return "Начать забег может только хозяин лобби";
@@ -124,14 +153,20 @@ public final class LobbyService {
 
         results.clear();
         long seed = ThreadLocalRandom.current().nextLong();
-        LobbyRunConfig config = new LobbyRunConfig(seed, snapshot.cheatsEnabled(), snapshot.goal());
+        LobbyRunConfig config = new LobbyRunConfig(
+            seed,
+            snapshot.cheatsEnabled(),
+            snapshot.goal(),
+            snapshot.randomizationType()
+        );
         this.status = "Создание миров. Seed: " + seed;
         this.error = false;
         EvgeniumSpeedRun.LOGGER.info(
-            "Preparing synchronized speedrun with seed {} (goal={}, cheats={})",
+            "Preparing synchronized speedrun with seed {} (goal={}, cheats={}, randomization={})",
             seed,
             config.goal().id(),
-            config.cheatsEnabled()
+            config.cheatsEnabled(),
+            config.randomizationType().id()
         );
         host.startRun(config);
         return null;
@@ -242,6 +277,7 @@ public final class LobbyService {
             host.close();
             host = null;
         }
+        configuredRandomizationType = RandomizationType.MCSR_LIKE;
         snapshot = LobbySnapshot.empty();
         results.clear();
         status = "Не подключено";

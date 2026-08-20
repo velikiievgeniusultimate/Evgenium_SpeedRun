@@ -7,6 +7,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import org.evgenium.speedrun.client.lobby.LobbyService;
 import org.evgenium.speedrun.client.lobby.LobbySnapshot;
+import org.evgenium.speedrun.client.lobby.RandomizationType;
 
 public final class RaceSettingsScreen extends Screen {
     private String error = "";
@@ -45,10 +46,19 @@ public final class RaceSettingsScreen extends Screen {
         cheats.active = editable;
         this.addRenderableWidget(cheats);
 
-        Button randomization = Button.builder(Component.literal("ТИП РАНДОМИЗАЦИИ: СКОРО"), button -> {})
+        Button randomization = Button.builder(randomizationLabel(snapshot), button -> {
+                RandomizationType next = LobbyService.get().snapshot().randomizationType().next();
+                String failure = LobbyService.get().setRandomizationType(next);
+                if (failure != null) {
+                    this.error = failure;
+                    return;
+                }
+                this.error = "";
+                button.setMessage(randomizationLabel(LobbyService.get().snapshot()));
+            })
             .bounds(centerX - 130, y + 56, 260, 20)
             .build();
-        randomization.active = false;
+        randomization.active = editable;
         this.addRenderableWidget(randomization);
 
         Button globalEvent = Button.builder(Component.literal("ГЛОБАЛЬНЫЙ ИВЕНТ: СКОРО"), button -> {})
@@ -69,6 +79,10 @@ public final class RaceSettingsScreen extends Screen {
 
     private static Component cheatsLabel(LobbySnapshot snapshot) {
         return Component.literal("ЧИТЫ: " + (snapshot.cheatsEnabled() ? "ВКЛ" : "ВЫКЛ"));
+    }
+
+    private static Component randomizationLabel(LobbySnapshot snapshot) {
+        return Component.literal("ТИП РАНДОМИЗАЦИИ: " + snapshot.randomizationType().displayName());
     }
 
     @Override
