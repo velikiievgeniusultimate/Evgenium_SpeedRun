@@ -5,8 +5,8 @@ import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.TransferState;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
-import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ServerboundTeleportToEntityPacket;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.GameType;
 import org.evgenium.speedrun.EvgeniumSpeedRun;
@@ -95,13 +95,14 @@ public final class SpectatorRelayClient {
     private static void connectMinecraft(Minecraft minecraft, int localPort) {
         minecraft.execute(() -> {
             String addressText = "127.0.0.1:" + localPort;
+            SpectatorTargetScreen returnScreen = new SpectatorTargetScreen();
             if (minecraft.level != null) {
-                minecraft.disconnect(Component.literal("Переключение мира наблюдателя"));
+                minecraft.disconnect(returnScreen, false);
             }
             ServerAddress address = ServerAddress.parseString(addressText);
             ServerData data = new ServerData("Evgenium Spectator", addressText, ServerData.Type.OTHER);
             TransferState transferState = new TransferState(Map.of(), Map.of(), false);
-            ConnectScreen.startConnecting(new SpectatorTargetScreen(), minecraft, address, data, false, transferState);
+            ConnectScreen.startConnecting(returnScreen, minecraft, address, data, false, transferState);
         });
     }
 
@@ -157,7 +158,7 @@ public final class SpectatorRelayClient {
                 }
                 if (!server.isPublished()) {
                     int port = findFreePort();
-                    if (!server.publishServer(GameType.SPECTATOR, false, port)) {
+                    if (!server.publishServer(MinecraftServer.MultiplayerScope.LAN, GameType.SPECTATOR, false, port)) {
                         throw new IllegalStateException("Minecraft не смог открыть локальный spectator-порт");
                     }
                 }
