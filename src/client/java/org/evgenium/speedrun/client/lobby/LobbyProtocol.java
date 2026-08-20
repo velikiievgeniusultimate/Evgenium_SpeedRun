@@ -1,0 +1,68 @@
+package org.evgenium.speedrun.client.lobby;
+
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+final class LobbyProtocol {
+    static final int MAGIC = 0x45565352; // EVSR
+    static final int VERSION = 1;
+    static final byte STATE = 10;
+    static final byte ERROR = 11;
+    static final byte LEAVE = 20;
+
+    private LobbyProtocol() {
+    }
+
+    static void writeHello(DataOutputStream out, String playerName) throws IOException {
+        out.writeInt(MAGIC);
+        out.writeInt(VERSION);
+        out.writeUTF(playerName);
+        out.flush();
+    }
+
+    static String readHello(DataInputStream in) throws IOException {
+        if (in.readInt() != MAGIC) {
+            throw new IOException("Это не Evgenium SpeedRun lobby");
+        }
+        int version = in.readInt();
+        if (version != VERSION) {
+            throw new IOException("Несовместимая версия протокола: " + version);
+        }
+        String name = in.readUTF().trim();
+        if (name.isEmpty() || name.length() > 32) {
+            throw new IOException("Некорректное имя игрока");
+        }
+        return name;
+    }
+
+    static void writeState(DataOutputStream out, LobbySnapshot snapshot) throws IOException {
+        out.writeByte(STATE);
+        out.writeInt(snapshot.players().size());
+        for (LobbyPlayer player : snapshot.players()) {
+            out.writeUTF(player.name());
+            out.writeBoolean(player.host());
+        }
+        out.flush();
+    }
+
+    static LobbySnapshot readState(DataInputStream in) throws IOException {
+        int count = in.readInt();
+        if (count < 0 || count > 128) {
+            throw new IOException("Некорректный размер лобби");
+        }
+        List<LobbyPlayer> players = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            players.add(new LobbyPlayer(in.readUTF(), in.readBoolean()));
+        }
+        return new LobbySnapshot(players);
+    }
+
+    static void writeError(DataOutputStream out, String message) throws IOException {
+        out.writeByte(ERROR);
+        out.writeUTF(message);
+        out.flush();
+    }
+}

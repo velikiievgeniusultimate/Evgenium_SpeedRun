@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "package": "org.evgenium.speedrun.client.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "TitleScreenMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "overwrites": {
+    "requireAnnotations": true
+  }
+}
