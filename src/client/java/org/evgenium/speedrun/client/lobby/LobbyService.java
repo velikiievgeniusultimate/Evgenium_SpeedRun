@@ -4,20 +4,27 @@ import net.minecraft.client.Minecraft;
 import org.evgenium.speedrun.EvgeniumSpeedRun;
 import org.evgenium.speedrun.client.match.RaceSession;
 import org.evgenium.speedrun.client.match.SpeedrunWorldLauncher;
+import org.evgenium.speedrun.client.spectator.SpectatorRelayClient;
 import org.evgenium.speedrun.client.runtime.ClientPhase;
 import org.evgenium.speedrun.client.runtime.ClientRuntime;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ThreadLocalRandom;
 
 public final class LobbyService {
     private static final LobbyService INSTANCE = new LobbyService();
 
     private volatile LobbySnapshot snapshot = LobbySnapshot.empty();
+    private final CopyOnWriteArrayList<LobbyRaceResult> results = new CopyOnWriteArrayList<>();
     private volatile String status = "Не подключено";
     private volatile boolean error;
     private volatile boolean hosting;
     private volatile String endpointText = "";
+    private volatile int lobbyPort = -1;
+    private volatile String remoteLobbyHost = "";
     private LobbyHost host;
     private LobbyClient client;
 
@@ -38,11 +45,14 @@ public final class LobbyService {
                 snapshot -> this.snapshot = snapshot,
                 this::acceptRun,
                 this::acceptGo,
-                this::acceptRaceResult
+                this::acceptFinishUpdate,
+                tunnelId -> SpectatorRelayClient.openTargetTunnel("127.0.0.1", port, tunnelId)
             );
             newHost.start();
             this.host = newHost;
             this.hosting = true;
+            this.lobbyPort = port;
+            this.remoteLobbyHost = "127.0.0.1";
             this.error = false;
             this.status = "Лобби открыто. Ожидание игроков";
             this.endpointText = "Адрес в локальной сети: " + NetworkAddresses.bestLocalIpv4() + ":" + port;
@@ -59,6 +69,8 @@ public final class LobbyService {
     public synchronized void join(String hostName, int port, String playerName) {
         leave();
         this.hosting = false;
+        this.lobbyPort = port;
+        this.remoteLobbyHost = hostName;
         this.error = false;
         this.snapshot = LobbySnapshot.empty();
         this.endpointText = "Хозяин: " + hostName + ":" + port;
@@ -70,7 +82,8 @@ public final class LobbyService {
             snapshot -> this.snapshot = snapshot,
             this::acceptRun,
             this::acceptGo,
-            this::acceptRaceResult,
+            this::acceptFinishUpdate,
+            tunnelId -> SpectatorRelayClient.openTargetTunnel(hostName, port, tunnelId),
             this::acceptClientStatus
         );
         this.client.startAsync();
@@ -94,6 +107,7 @@ public final class LobbyService {
             return "Начать забег может только хозяин лобби";
         }
 
+        results.clear();
         long seed = ThreadLocalRandom.current().nextLong();
         LobbyRunConfig config = new LobbyRunConfig(seed, snapshot.cheatsEnabled(), snapshot.goal());
         this.status = "Создание миров. Seed: " + seed;
@@ -109,6 +123,7 @@ public final class LobbyService {
     }
 
     private void acceptRun(LobbyRunConfig config) {
+        results.clear();
         this.status = "Создание мира. Seed: " + config.seed();
         this.error = false;
         Minecraft.getInstance().execute(() -> SpeedrunWorldLauncher.launch(config));
@@ -140,10 +155,15 @@ public final class LobbyService {
         }
     }
 
-    private void acceptRaceResult(LobbyRaceResult result) {
-        this.status = "Победитель: " + result.winnerName();
+    private void acceptFinishUpdate(LobbyRaceResult result) {
+        boolean exists = results.stream().anyMatch(existing -> existing.playerName().equals(result.playerName()));
+        if (exists) {
+            return;
+        }
+        results.add(result);
+        this.status = result.playerName() + " занял " + result.place() + " место";
         this.error = false;
-        Minecraft.getInstance().execute(() -> RaceSession.finish(result));
+        Minecraft.getInstance().execute(() -> RaceSession.onFinishUpdate(result));
     }
 
     private void acceptClientStatus(String newStatus) {
@@ -151,7 +171,39 @@ public final class LobbyService {
         this.error = newStatus.startsWith("Ошибка") || newStatus.contains("закрыто хозяином");
     }
 
+    public List<LobbyRaceResult> results() {
+        return List.copyOf(results);
+    }
+
+    public List<String> runningPlayerNames() {
+        List<String> running = new ArrayList<>();
+        for (LobbyPlayer player : snapshot.players()) {
+            boolean finished = results.stream().anyMatch(result -> result.playerName().equals(player.name()));
+            if (!finished) {
+                running.add(player.name());
+            }
+        }
+        return running;
+    }
+
+    public boolean hasFinished(String playerName) {
+        return results.stream().anyMatch(result -> result.playerName().equals(playerName));
+    }
+
+    public String localPlayerName() {
+        return Minecraft.getInstance().getUser().getName();
+    }
+
+    public String relayHost() {
+        return hosting ? "127.0.0.1" : remoteLobbyHost;
+    }
+
+    public int relayPort() {
+        return lobbyPort;
+    }
+
     public synchronized void leave() {
+        SpectatorRelayClient.closeLocalProxy();
         if (client != null) {
             client.close();
             client = null;
@@ -161,10 +213,13 @@ public final class LobbyService {
             host = null;
         }
         snapshot = LobbySnapshot.empty();
+        results.clear();
         status = "Не подключено";
         error = false;
         hosting = false;
         endpointText = "";
+        lobbyPort = -1;
+        remoteLobbyHost = "";
         if (ClientRuntime.phase() == ClientPhase.LOBBY) {
             ClientRuntime.transitionTo(ClientPhase.MENU);
         }
