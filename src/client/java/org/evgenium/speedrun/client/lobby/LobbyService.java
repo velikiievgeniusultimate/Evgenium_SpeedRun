@@ -105,6 +105,18 @@ public final class LobbyService {
         return null;
     }
 
+    public synchronized String setCheatsEnabled(boolean enabled) {
+        if (!hosting || host == null) {
+            return "Менять читы может только хозяин лобби";
+        }
+        if (!host.setCheatsEnabled(enabled)) {
+            return "Нельзя менять читы после начала подготовки забега";
+        }
+        this.status = "Читы: " + (enabled ? "ВКЛ" : "ВЫКЛ");
+        this.error = false;
+        return null;
+    }
+
     public synchronized String startRun() {
         if (!hosting || host == null) {
             return "Начать забег может только хозяин лобби";
