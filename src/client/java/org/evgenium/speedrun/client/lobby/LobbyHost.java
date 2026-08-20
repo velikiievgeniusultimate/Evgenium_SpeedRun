@@ -35,6 +35,7 @@ final class LobbyHost implements AutoCloseable {
     private final Consumer<LobbyRunConfig> runConsumer;
     private final LongConsumer goConsumer;
     private final Consumer<LobbyRaceResult> resultConsumer;
+    private final Consumer<LobbyAdvancement> advancementConsumer;
     private final LongConsumer localTunnelConsumer;
     private final CopyOnWriteArrayList<Peer> peers = new CopyOnWriteArrayList<>();
     private final Map<String, LobbyRaceResult> finishes = new LinkedHashMap<>();
@@ -49,7 +50,8 @@ final class LobbyHost implements AutoCloseable {
 
     LobbyHost(int port, String hostName, boolean cheatsEnabled, Consumer<LobbySnapshot> snapshotConsumer,
               Consumer<LobbyRunConfig> runConsumer, LongConsumer goConsumer,
-              Consumer<LobbyRaceResult> resultConsumer, LongConsumer localTunnelConsumer) {
+              Consumer<LobbyRaceResult> resultConsumer, Consumer<LobbyAdvancement> advancementConsumer,
+              LongConsumer localTunnelConsumer) {
         this.port = port;
         this.hostPlayer = new LobbyPlayer(hostName, true);
         this.cheatsEnabled = cheatsEnabled;
@@ -57,6 +59,7 @@ final class LobbyHost implements AutoCloseable {
         this.runConsumer = runConsumer;
         this.goConsumer = goConsumer;
         this.resultConsumer = resultConsumer;
+        this.advancementConsumer = advancementConsumer;
         this.localTunnelConsumer = localTunnelConsumer;
     }
 
@@ -146,6 +149,10 @@ final class LobbyHost implements AutoCloseable {
                 }
                 if (message == LobbyProtocol.FINISH) {
                     handleFinish(peer.playerName, LobbyProtocol.readFinish(in));
+                    continue;
+                }
+                if (message == LobbyProtocol.ADVANCEMENT) {
+                    handleAdvancement(peer.playerName, LobbyProtocol.readAdvancement(in));
                     continue;
                 }
                 throw new IOException("Неизвестное сообщение клиента: " + message);
@@ -278,6 +285,13 @@ final class LobbyHost implements AutoCloseable {
         handleFinish(hostPlayer.name(), elapsedMillis);
     }
 
+    synchronized void markHostAdvancement(String titleKey, String fallbackTitle) {
+        if (!goIssued || finishes.containsKey(hostPlayer.name())) {
+            return;
+        }
+        broadcastAdvancement(new LobbyAdvancement(hostPlayer.name(), titleKey, fallbackTitle));
+    }
+
     private synchronized void maybeStartCountdown() {
         if (!preparingRun || !hostReady) {
             return;
@@ -322,6 +336,25 @@ final class LobbyHost implements AutoCloseable {
             }
         }
         resultConsumer.accept(result);
+    }
+
+    private synchronized void handleAdvancement(String playerName, LobbyProtocol.AdvancementPayload payload) {
+        if (!goIssued || finishes.containsKey(playerName)) {
+            return;
+        }
+        broadcastAdvancement(new LobbyAdvancement(playerName, payload.titleKey(), payload.fallbackTitle()));
+    }
+
+    private void broadcastAdvancement(LobbyAdvancement advancement) {
+        EvgeniumSpeedRun.LOGGER.info("Runner advancement: {} -> {}", advancement.playerName(), advancement.fallbackTitle());
+        for (Peer peer : peers) {
+            try {
+                peer.sendAdvancement(advancement);
+            } catch (IOException exception) {
+                closeQuietly(peer.socket);
+            }
+        }
+        advancementConsumer.accept(advancement);
     }
 
     private LobbySnapshot snapshot() {
@@ -438,6 +471,10 @@ final class LobbyHost implements AutoCloseable {
 
         private synchronized void sendResult(LobbyRaceResult result) throws IOException {
             LobbyProtocol.writeFinishUpdate(out, result);
+        }
+
+        private synchronized void sendAdvancement(LobbyAdvancement advancement) throws IOException {
+            LobbyProtocol.writeAdvancementBroadcast(out, advancement);
         }
 
         private synchronized void sendOpenTunnel(long tunnelId) throws IOException {

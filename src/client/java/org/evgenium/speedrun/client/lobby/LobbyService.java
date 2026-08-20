@@ -2,6 +2,7 @@ package org.evgenium.speedrun.client.lobby;
 
 import net.minecraft.client.Minecraft;
 import org.evgenium.speedrun.EvgeniumSpeedRun;
+import org.evgenium.speedrun.client.match.AdvancementChat;
 import org.evgenium.speedrun.client.match.RaceSession;
 import org.evgenium.speedrun.client.match.SpeedrunWorldLauncher;
 import org.evgenium.speedrun.client.spectator.SpectatorRelayClient;
@@ -46,6 +47,7 @@ public final class LobbyService {
                 this::acceptRun,
                 this::acceptGo,
                 this::acceptFinishUpdate,
+                this::acceptAdvancement,
                 tunnelId -> SpectatorRelayClient.openTargetTunnel("127.0.0.1", port, tunnelId)
             );
             newHost.start();
@@ -83,6 +85,7 @@ public final class LobbyService {
             this::acceptRun,
             this::acceptGo,
             this::acceptFinishUpdate,
+            this::acceptAdvancement,
             tunnelId -> SpectatorRelayClient.openTargetTunnel(hostName, port, tunnelId),
             this::acceptClientStatus
         );
@@ -155,6 +158,17 @@ public final class LobbyService {
         }
     }
 
+    public synchronized void reportAdvancement(String titleKey, String fallbackTitle) {
+        if (!RaceSession.isRunning()) {
+            return;
+        }
+        if (hosting && host != null) {
+            host.markHostAdvancement(titleKey, fallbackTitle);
+        } else if (client != null) {
+            client.sendAdvancement(titleKey, fallbackTitle);
+        }
+    }
+
     private void acceptFinishUpdate(LobbyRaceResult result) {
         boolean exists = results.stream().anyMatch(existing -> existing.playerName().equals(result.playerName()));
         if (exists) {
@@ -164,6 +178,10 @@ public final class LobbyService {
         this.status = result.playerName() + " занял " + result.place() + " место";
         this.error = false;
         Minecraft.getInstance().execute(() -> RaceSession.onFinishUpdate(result));
+    }
+
+    private void acceptAdvancement(LobbyAdvancement advancement) {
+        Minecraft.getInstance().execute(() -> AdvancementChat.show(advancement));
     }
 
     private void acceptClientStatus(String newStatus) {

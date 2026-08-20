@@ -17,6 +17,7 @@ final class LobbyClient implements AutoCloseable {
     private final Consumer<LobbyRunConfig> runConsumer;
     private final LongConsumer goConsumer;
     private final Consumer<LobbyRaceResult> resultConsumer;
+    private final Consumer<LobbyAdvancement> advancementConsumer;
     private final LongConsumer tunnelRequestConsumer;
     private final Consumer<String> statusConsumer;
     private volatile boolean running;
@@ -25,8 +26,8 @@ final class LobbyClient implements AutoCloseable {
 
     LobbyClient(String host, int port, String playerName, Consumer<LobbySnapshot> snapshotConsumer,
                 Consumer<LobbyRunConfig> runConsumer, LongConsumer goConsumer,
-                Consumer<LobbyRaceResult> resultConsumer, LongConsumer tunnelRequestConsumer,
-                Consumer<String> statusConsumer) {
+                Consumer<LobbyRaceResult> resultConsumer, Consumer<LobbyAdvancement> advancementConsumer,
+                LongConsumer tunnelRequestConsumer, Consumer<String> statusConsumer) {
         this.host = host;
         this.port = port;
         this.playerName = playerName;
@@ -34,6 +35,7 @@ final class LobbyClient implements AutoCloseable {
         this.runConsumer = runConsumer;
         this.goConsumer = goConsumer;
         this.resultConsumer = resultConsumer;
+        this.advancementConsumer = advancementConsumer;
         this.tunnelRequestConsumer = tunnelRequestConsumer;
         this.statusConsumer = statusConsumer;
     }
@@ -76,6 +78,8 @@ final class LobbyClient implements AutoCloseable {
                         goConsumer.accept(LobbyProtocol.readGo(in));
                     } else if (message == LobbyProtocol.FINISH_UPDATE) {
                         resultConsumer.accept(LobbyProtocol.readFinishUpdate(in));
+                    } else if (message == LobbyProtocol.ADVANCEMENT_BROADCAST) {
+                        advancementConsumer.accept(LobbyProtocol.readAdvancementBroadcast(in));
                     } else if (message == LobbyProtocol.OPEN_SPECTATOR_TUNNEL) {
                         tunnelRequestConsumer.accept(LobbyProtocol.readOpenSpectatorTunnel(in));
                     } else if (message == LobbyProtocol.ERROR) {
@@ -124,6 +128,20 @@ final class LobbyClient implements AutoCloseable {
             }
         } catch (IOException exception) {
             statusConsumer.accept("Ошибка FINISH: " + exception.getMessage());
+        }
+    }
+
+    void sendAdvancement(String titleKey, String fallbackTitle) {
+        DataOutputStream stream = this.out;
+        if (stream == null) {
+            return;
+        }
+        try {
+            synchronized (stream) {
+                LobbyProtocol.writeAdvancement(stream, titleKey, fallbackTitle);
+            }
+        } catch (IOException exception) {
+            statusConsumer.accept("Ошибка ADVANCEMENT: " + exception.getMessage());
         }
     }
 
