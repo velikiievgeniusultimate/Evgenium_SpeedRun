@@ -18,19 +18,22 @@ final class LobbyClient implements AutoCloseable {
     private final Consumer<LobbySnapshot> snapshotConsumer;
     private final Consumer<LobbyRunConfig> runConsumer;
     private final LongConsumer goConsumer;
+    private final Consumer<LobbyRaceResult> resultConsumer;
     private final Consumer<String> statusConsumer;
     private volatile boolean running;
     private Socket socket;
     private DataOutputStream out;
 
     LobbyClient(String host, int port, String playerName, Consumer<LobbySnapshot> snapshotConsumer,
-                Consumer<LobbyRunConfig> runConsumer, LongConsumer goConsumer, Consumer<String> statusConsumer) {
+                Consumer<LobbyRunConfig> runConsumer, LongConsumer goConsumer,
+                Consumer<LobbyRaceResult> resultConsumer, Consumer<String> statusConsumer) {
         this.host = host;
         this.port = port;
         this.playerName = playerName;
         this.snapshotConsumer = snapshotConsumer;
         this.runConsumer = runConsumer;
         this.goConsumer = goConsumer;
+        this.resultConsumer = resultConsumer;
         this.statusConsumer = statusConsumer;
     }
 
@@ -62,6 +65,8 @@ final class LobbyClient implements AutoCloseable {
                         runConsumer.accept(LobbyProtocol.readStartRun(in));
                     } else if (message == LobbyProtocol.GO) {
                         goConsumer.accept(LobbyProtocol.readGo(in));
+                    } else if (message == LobbyProtocol.RACE_FINISHED) {
+                        resultConsumer.accept(LobbyProtocol.readRaceFinished(in));
                     } else if (message == LobbyProtocol.ERROR) {
                         throw new IOException(in.readUTF());
                     } else {
@@ -94,6 +99,20 @@ final class LobbyClient implements AutoCloseable {
             statusConsumer.accept("Мир готов. Ждём остальных игроков");
         } catch (IOException exception) {
             statusConsumer.accept("Ошибка READY: " + exception.getMessage());
+        }
+    }
+
+    void sendFinish(long elapsedMillis) {
+        DataOutputStream stream = this.out;
+        if (stream == null) {
+            return;
+        }
+        try {
+            synchronized (stream) {
+                LobbyProtocol.writeFinish(stream, elapsedMillis);
+            }
+        } catch (IOException exception) {
+            statusConsumer.accept("Ошибка FINISH: " + exception.getMessage());
         }
     }
 
