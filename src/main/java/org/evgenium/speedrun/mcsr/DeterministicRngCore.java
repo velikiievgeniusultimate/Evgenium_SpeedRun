@@ -7,9 +7,8 @@ import java.util.List;
  * Pure deterministic RNG primitives.
  *
  * There is deliberately no java.util.Random instance here. Every event is addressed by the
- * tuple (rngSeed, stream, eventIndex). Composite operations such as shuffle derive all of their
- * internal draws from that single event value and therefore never consume another stream or an
- * unpredictable number of event indices.
+ * tuple (rngSeed, stream, eventIndex). Composite operations derive their internal draws from one
+ * event value and therefore never consume another stream index.
  */
 public final class DeterministicRngCore {
     private static final long GOLDEN_GAMMA = 0x9E3779B97F4A7C15L;
@@ -30,8 +29,19 @@ public final class DeterministicRngCore {
         return mix64(rngSeed ^ streamSalt ^ indexed);
     }
 
+    /**
+     * Derives an independent deterministic subdraw from one already-addressed event.
+     * This is used by composite events such as one entity death having both a base-count roll and
+     * a Looting roll. No additional stream event index is consumed.
+     */
+    public static long derive(long eventRawValue, long subIndex) {
+        if (subIndex < 0L) {
+            throw new IllegalArgumentException("subIndex must be >= 0");
+        }
+        return mix64(eventRawValue ^ mix64(subIndex + GOLDEN_GAMMA));
+    }
+
     public static float unitFloat(long rawValue) {
-        // Exactly 24 random mantissa bits -> [0, 1), matching the useful precision of float.
         return (float) ((rawValue >>> 40) * 0x1.0p-24);
     }
 
@@ -63,9 +73,6 @@ public final class DeterministicRngCore {
 
         long range = (long) boundExclusive - originInclusive;
         long candidate = rawValue;
-
-        // Rejection sampling without consuming another event index. Rejected candidates are
-        // deterministically re-mixed from the same event value.
         while (true) {
             long u = candidate >>> 1;
             long result = u % range;

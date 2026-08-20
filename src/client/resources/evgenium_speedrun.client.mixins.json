@@ -5,9 +5,11 @@
   "client": [
     "BonusLevelTableConditionMixin",
     "CreateWorldScreenMixin",
+    "EnchantedCountIncreaseFunctionMixin",
     "HudMixin",
     "PlayerAdvancementsMixin",
     "ServerLoginPacketListenerMixin",
+    "SetItemCountFunctionMixin",
     "TitleScreenMixin",
     "UniformGeneratorMixin",
     "VanillaRaceChatMixin"
