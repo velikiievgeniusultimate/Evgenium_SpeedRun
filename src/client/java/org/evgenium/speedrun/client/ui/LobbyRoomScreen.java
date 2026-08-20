@@ -18,14 +18,11 @@ public final class LobbyRoomScreen extends Screen {
     protected void init() {
         int centerX = this.width / 2;
         LobbyService service = LobbyService.get();
-        LobbySnapshot snapshot = service.snapshot();
 
-        Button goal = Button.builder(Component.literal("ЦЕЛЬ: " + snapshot.goal().displayName()), button ->
-                Minecraft.getInstance().gui.setScreen(new GoalSelectionScreen()))
+        this.addRenderableWidget(Button.builder(Component.literal("НАСТРОЙКИ ЗАБЕГА"), button ->
+                Minecraft.getInstance().gui.setScreen(new RaceSettingsScreen()))
             .bounds(centerX - 110, 88, 220, 20)
-            .build();
-        goal.active = service.isHosting();
-        this.addRenderableWidget(goal);
+            .build());
 
         Button start = Button.builder(Component.literal(service.isHosting() ? "НАЧАТЬ ЗАБЕГ" : "ЖДЁМ ХОЗЯИНА"), button -> {
                 button.active = false;
@@ -64,11 +61,19 @@ public final class LobbyRoomScreen extends Screen {
         String endpoint = service.endpointText();
         graphics.text(this.font, endpoint, (this.width - this.font.width(endpoint)) / 2, 40, 0xFFBBBBBB, false);
 
-        String rules = "Survival • Easy • Читы: " + (snapshot.cheatsEnabled() ? "ВКЛ (ОТЛАДКА)" : "ВЫКЛ");
-        graphics.text(this.font, rules, (this.width - this.font.width(rules)) / 2, 56, snapshot.cheatsEnabled() ? 0xFFFFCC66 : 0xFFAAAAAA, false);
+        String baseRules = "Survival • Easy";
+        graphics.text(this.font, baseRules, (this.width - this.font.width(baseRules)) / 2, 56, 0xFFAAAAAA, false);
 
-        String selectedGoal = "Цель: " + snapshot.goal().displayName();
-        graphics.text(this.font, selectedGoal, (this.width - this.font.width(selectedGoal)) / 2, 72, 0xFFFFFFFF, false);
+        String selectedRules = "Цель: " + snapshot.goal().displayName()
+            + " • Читы: " + (snapshot.cheatsEnabled() ? "ВКЛ" : "ВЫКЛ");
+        graphics.text(
+            this.font,
+            selectedRules,
+            (this.width - this.font.width(selectedRules)) / 2,
+            72,
+            snapshot.cheatsEnabled() ? 0xFFFFCC66 : 0xFFFFFFFF,
+            false
+        );
 
         String status = service.status();
         int statusColor = service.hasError() ? 0xFFFF7777 : 0xFFAAAAAA;
