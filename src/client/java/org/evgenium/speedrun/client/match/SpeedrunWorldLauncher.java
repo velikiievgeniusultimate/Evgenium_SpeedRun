@@ -17,7 +17,7 @@ public final class SpeedrunWorldLauncher {
 
     public static void launch(LobbyRunConfig config) {
         Minecraft minecraft = Minecraft.getInstance();
-        RunLaunchRequest request = new RunLaunchRequest(config.seed(), config.cheatsEnabled());
+        RunLaunchRequest request = new RunLaunchRequest(config.worldSeed(), config.cheatsEnabled());
         if (!PENDING.compareAndSet(null, request)) {
             return;
         }
