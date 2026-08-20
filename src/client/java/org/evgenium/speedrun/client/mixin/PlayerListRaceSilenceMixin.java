@@ -10,13 +10,13 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 @Mixin(PlayerList.class)
 public abstract class PlayerListRaceSilenceMixin {
     @Redirect(
-        method = {"placeNewPlayer", "remove"},
+        method = "placeNewPlayer",
         at = @At(
             value = "INVOKE",
             target = "Lnet/minecraft/server/players/PlayerList;broadcastSystemMessage(Lnet/minecraft/network/chat/Component;Z)V"
         )
     )
-    private void evgenium$hideRaceJoinLeaveMessages(PlayerList instance, Component message, boolean overlay) {
+    private void evgenium$hideRaceJoinMessage(PlayerList instance, Component message, boolean overlay) {
         if (RaceSession.isRunning()) {
             return;
         }
