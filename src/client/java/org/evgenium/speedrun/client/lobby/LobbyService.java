@@ -195,9 +195,7 @@ public final class LobbyService {
         Minecraft.getInstance().execute(() -> {
             if (!RaceSession.hasRunConfig()) {
                 SpeedrunWorldLauncher.launch(config);
-                return;
-            }
-            if (!RaceSession.matchesConfig(config)) {
+            } else if (!RaceSession.matchesConfig(config)) {
                 this.status = "Ошибка: reconnect получил другой конфиг забега";
                 this.error = true;
                 return;
