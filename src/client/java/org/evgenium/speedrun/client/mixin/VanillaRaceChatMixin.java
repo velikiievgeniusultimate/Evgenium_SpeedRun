@@ -27,7 +27,8 @@ public abstract class VanillaRaceChatMixin {
         String key = translatable.getKey();
         if (key.startsWith("chat.type.advancement.")
             || key.equals("multiplayer.player.joined")
-            || key.equals("multiplayer.player.joined.renamed")) {
+            || key.equals("multiplayer.player.joined.renamed")
+            || key.equals("multiplayer.player.left")) {
             ci.cancel();
         }
     }

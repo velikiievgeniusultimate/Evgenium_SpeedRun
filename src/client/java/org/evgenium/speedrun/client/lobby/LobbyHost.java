@@ -30,7 +30,7 @@ final class LobbyHost implements AutoCloseable {
 
     private final int port;
     private final LobbyPlayer hostPlayer;
-    private final boolean cheatsEnabled;
+    private volatile boolean cheatsEnabled;
     private final Consumer<LobbySnapshot> snapshotConsumer;
     private final Consumer<LobbyRunConfig> runConsumer;
     private final LongConsumer goConsumer;
@@ -250,6 +250,15 @@ final class LobbyHost implements AutoCloseable {
             return false;
         }
         this.goal = newGoal;
+        broadcastSnapshot();
+        return true;
+    }
+
+    synchronized boolean setCheatsEnabled(boolean enabled) {
+        if (preparingRun || goIssued) {
+            return false;
+        }
+        this.cheatsEnabled = enabled;
         broadcastSnapshot();
         return true;
     }

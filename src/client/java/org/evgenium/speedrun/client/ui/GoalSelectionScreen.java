@@ -27,7 +27,8 @@ public final class GoalSelectionScreen extends Screen {
             y += 26;
         }
 
-        this.addRenderableWidget(Button.builder(Component.literal("НАЗАД"), button -> Minecraft.getInstance().gui.setScreen(new LobbyRoomScreen()))
+        this.addRenderableWidget(Button.builder(Component.literal("НАЗАД"), button ->
+                Minecraft.getInstance().gui.setScreen(new RaceSettingsScreen()))
             .bounds(centerX - 110, y + 10, 220, 20)
             .build());
     }
@@ -38,13 +39,13 @@ public final class GoalSelectionScreen extends Screen {
             this.error = failure;
             return;
         }
-        Minecraft.getInstance().gui.setScreen(new LobbyRoomScreen());
+        Minecraft.getInstance().gui.setScreen(new RaceSettingsScreen());
     }
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
-        String title = "ЦЕЛЬ СПИДРАНА";
+        String title = "ЦЕЛЬ ПРОХОЖДЕНИЯ";
         graphics.text(this.font, title, (this.width - this.font.width(title)) / 2, 38, 0xFFFFFFFF, true);
 
         String hint = "Сейчас доступна одна цель. Позже здесь появятся другие режимы.";

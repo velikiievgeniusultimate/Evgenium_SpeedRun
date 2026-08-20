@@ -17,8 +17,8 @@ public final class SpectatorController {
             return;
         }
 
-        // The finished-player inventory is intentionally virtual: vanilla spectator mode has
-        // no normal hotbar. Right click always activates our single selector slot.
+        // Finished runners stay in pure vanilla spectator mode with no custom hotbar item.
+        // Right click remains the invisible Evgenium shortcut for selecting another runner.
         if (minecraft.options.keyUse.consumeClick()) {
             minecraft.gui.setScreen(new SpectatorTargetScreen());
         }
