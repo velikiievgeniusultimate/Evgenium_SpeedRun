@@ -34,6 +34,12 @@ public final class FlintRngHooks {
             return Optional.empty();
         }
 
+        // All explosion-driven block loot remains vanilla. This prevents a vanilla
+        // survives_explosion decision from conditionally advancing the competitive stream.
+        if (context.hasParameter(LootContextParams.EXPLOSION_RADIUS)) {
+            return Optional.empty();
+        }
+
         BlockState state = context.getOptionalParameter(LootContextParams.BLOCK_STATE);
         if (state == null || !state.is(Blocks.GRAVEL)) {
             return Optional.empty();
