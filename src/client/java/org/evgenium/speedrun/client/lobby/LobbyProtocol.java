@@ -8,7 +8,7 @@ import java.util.List;
 
 final class LobbyProtocol {
     static final int MAGIC = 0x45565352; // EVSR
-    static final int VERSION = 7;
+    static final int VERSION = 8;
 
     static final byte CHANNEL_CONTROL = 1;
     static final byte CHANNEL_SPECTATOR_SOURCE = 2;
@@ -102,6 +102,7 @@ final class LobbyProtocol {
         out.writeByte(STATE);
         out.writeBoolean(snapshot.cheatsEnabled());
         out.writeUTF(snapshot.goal().id());
+        out.writeUTF(snapshot.randomizationType().id());
         out.writeInt(snapshot.players().size());
         for (LobbyPlayer player : snapshot.players()) {
             out.writeUTF(player.name());
@@ -113,8 +114,10 @@ final class LobbyProtocol {
     static LobbySnapshot readState(DataInputStream in) throws IOException {
         boolean cheatsEnabled = in.readBoolean();
         SpeedrunGoal goal;
+        RandomizationType randomizationType;
         try {
             goal = SpeedrunGoal.fromId(in.readUTF());
+            randomizationType = RandomizationType.fromId(in.readUTF());
         } catch (IllegalArgumentException exception) {
             throw new IOException(exception.getMessage(), exception);
         }
@@ -126,7 +129,7 @@ final class LobbyProtocol {
         for (int i = 0; i < count; i++) {
             players.add(new LobbyPlayer(in.readUTF(), in.readBoolean()));
         }
-        return new LobbySnapshot(players, cheatsEnabled, goal);
+        return new LobbySnapshot(players, cheatsEnabled, goal, randomizationType);
     }
 
     static void writeStartRun(DataOutputStream out, LobbyRunConfig config) throws IOException {
@@ -134,6 +137,7 @@ final class LobbyProtocol {
         out.writeLong(config.seed());
         out.writeBoolean(config.cheatsEnabled());
         out.writeUTF(config.goal().id());
+        out.writeUTF(config.randomizationType().id());
         out.flush();
     }
 
@@ -141,7 +145,9 @@ final class LobbyProtocol {
         long seed = in.readLong();
         boolean cheatsEnabled = in.readBoolean();
         try {
-            return new LobbyRunConfig(seed, cheatsEnabled, SpeedrunGoal.fromId(in.readUTF()));
+            SpeedrunGoal goal = SpeedrunGoal.fromId(in.readUTF());
+            RandomizationType randomizationType = RandomizationType.fromId(in.readUTF());
+            return new LobbyRunConfig(seed, cheatsEnabled, goal, randomizationType);
         } catch (IllegalArgumentException exception) {
             throw new IOException(exception.getMessage(), exception);
         }
