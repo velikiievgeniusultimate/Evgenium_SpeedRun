@@ -84,8 +84,9 @@ public final class LobbyRoomScreen extends Screen {
         graphics.text(this.font, "Игроки: " + snapshot.players().size(), listX, y, 0xFFFFFFFF, true);
         y += 18;
         for (LobbyPlayer player : snapshot.players()) {
-            String line = (player.host() ? "★ " : "• ") + player.name();
-            graphics.text(this.font, line, listX, y, player.host() ? 0xFFFFDD77 : 0xFFFFFFFF, false);
+            String line = (player.host() ? "★ " : "• ") + player.name() + (player.connected() ? "" : "  [НЕТ СВЯЗИ]");
+            int color = !player.connected() ? 0xFFFF7777 : player.host() ? 0xFFFFDD77 : 0xFFFFFFFF;
+            graphics.text(this.font, line, listX, y, color, false);
             y += 16;
         }
     }
