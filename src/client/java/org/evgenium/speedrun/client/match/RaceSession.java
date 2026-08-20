@@ -3,7 +3,6 @@ package org.evgenium.speedrun.client.match;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.evgenium.speedrun.EvgeniumSpeedRun;
 import org.evgenium.speedrun.client.lobby.LobbyRunConfig;
@@ -54,14 +53,13 @@ public final class RaceSession {
     }
 
     private static void normalizeSpawnAndReportReady(Minecraft minecraft, MinecraftServer server, UUID playerId) {
-        ServerLevel level = server.overworld();
         ServerPlayer player = server.getPlayerList().getPlayer(playerId);
         if (player == null) {
             minecraft.execute(RaceSession::reportReady);
             return;
         }
 
-        BlockPos spawn = level.getSharedSpawnPos();
+        BlockPos spawn = server.getRespawnData().pos();
         double x = spawn.getX() + 0.5D;
         double y = spawn.getY();
         double z = spawn.getZ() + 0.5D;
