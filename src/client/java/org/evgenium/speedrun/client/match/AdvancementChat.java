@@ -12,7 +12,7 @@ public final class AdvancementChat {
 
     public static void show(LobbyAdvancement advancement) {
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null) {
+        if (minecraft.gui == null || minecraft.gui.hud == null) {
             return;
         }
 
@@ -27,6 +27,6 @@ public final class AdvancementChat {
             .append(title.withStyle(ChatFormatting.GREEN))
             .append(Component.literal("]").withStyle(ChatFormatting.GREEN));
 
-        minecraft.player.displayClientMessage(message, false);
+        minecraft.gui.hud.getChat().addMessage(message);
     }
 }
