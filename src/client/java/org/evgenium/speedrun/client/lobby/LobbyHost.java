@@ -27,20 +27,25 @@ final class LobbyHost implements AutoCloseable {
     private final Consumer<LobbySnapshot> snapshotConsumer;
     private final Consumer<LobbyRunConfig> runConsumer;
     private final LongConsumer goConsumer;
+    private final Consumer<LobbyRaceResult> resultConsumer;
     private final CopyOnWriteArrayList<Peer> peers = new CopyOnWriteArrayList<>();
     private volatile boolean running;
     private volatile boolean preparingRun;
     private volatile boolean hostReady;
+    private volatile boolean goIssued;
+    private volatile boolean raceFinished;
+    private volatile SpeedrunGoal goal = SpeedrunGoal.COMPLETE_MINECRAFT;
     private ServerSocket serverSocket;
 
     LobbyHost(int port, String hostName, boolean cheatsEnabled, Consumer<LobbySnapshot> snapshotConsumer,
-              Consumer<LobbyRunConfig> runConsumer, LongConsumer goConsumer) {
+              Consumer<LobbyRunConfig> runConsumer, LongConsumer goConsumer, Consumer<LobbyRaceResult> resultConsumer) {
         this.port = port;
         this.hostPlayer = new LobbyPlayer(hostName, true);
         this.cheatsEnabled = cheatsEnabled;
         this.snapshotConsumer = snapshotConsumer;
         this.runConsumer = runConsumer;
         this.goConsumer = goConsumer;
+        this.resultConsumer = resultConsumer;
     }
 
     void start() throws IOException {
@@ -80,8 +85,8 @@ final class LobbyHost implements AutoCloseable {
              DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
              DataOutputStream out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()))) {
             String playerName = LobbyProtocol.readHello(in);
-            if (preparingRun) {
-                LobbyProtocol.writeError(out, "Забег уже запускается");
+            if (preparingRun || goIssued) {
+                LobbyProtocol.writeError(out, "Забег уже запущен");
                 return;
             }
 
@@ -97,6 +102,10 @@ final class LobbyHost implements AutoCloseable {
                 if (message == LobbyProtocol.READY) {
                     peer.ready = true;
                     maybeStartCountdown();
+                    continue;
+                }
+                if (message == LobbyProtocol.FINISH) {
+                    handleFinish(peer.playerName, LobbyProtocol.readFinish(in));
                     continue;
                 }
                 throw new IOException("Неизвестное сообщение клиента: " + message);
@@ -116,9 +125,20 @@ final class LobbyHost implements AutoCloseable {
         }
     }
 
+    synchronized boolean setGoal(SpeedrunGoal newGoal) {
+        if (preparingRun || goIssued) {
+            return false;
+        }
+        this.goal = newGoal;
+        broadcastSnapshot();
+        return true;
+    }
+
     synchronized void startRun(LobbyRunConfig config) {
         preparingRun = true;
         hostReady = false;
+        goIssued = false;
+        raceFinished = false;
         for (Peer peer : peers) {
             peer.ready = false;
         }
@@ -144,6 +164,10 @@ final class LobbyHost implements AutoCloseable {
         maybeStartCountdown();
     }
 
+    synchronized void markHostFinished(long elapsedMillis) {
+        handleFinish(hostPlayer.name(), elapsedMillis);
+    }
+
     private synchronized void maybeStartCountdown() {
         if (!preparingRun || !hostReady) {
             return;
@@ -155,6 +179,7 @@ final class LobbyHost implements AutoCloseable {
         }
 
         preparingRun = false;
+        goIssued = true;
         long startAtEpochMillis = System.currentTimeMillis() + COUNTDOWN_MILLIS;
         EvgeniumSpeedRun.LOGGER.info("All runners READY; synchronized GO at {}", startAtEpochMillis);
 
@@ -171,13 +196,34 @@ final class LobbyHost implements AutoCloseable {
         goConsumer.accept(startAtEpochMillis);
     }
 
+    private synchronized void handleFinish(String winnerName, long elapsedMillis) {
+        if (!goIssued || raceFinished) {
+            return;
+        }
+        raceFinished = true;
+        LobbyRaceResult result = new LobbyRaceResult(winnerName, elapsedMillis);
+        EvgeniumSpeedRun.LOGGER.info("Race finished: {} won in {} ms", winnerName, elapsedMillis);
+
+        for (Peer peer : peers) {
+            try {
+                peer.sendResult(result);
+            } catch (IOException exception) {
+                try {
+                    peer.socket.close();
+                } catch (IOException ignored) {
+                }
+            }
+        }
+        resultConsumer.accept(result);
+    }
+
     private LobbySnapshot snapshot() {
         List<LobbyPlayer> players = new ArrayList<>(peers.size() + 1);
         players.add(hostPlayer);
         for (Peer peer : peers) {
             players.add(new LobbyPlayer(peer.playerName, false));
         }
-        return new LobbySnapshot(players, cheatsEnabled);
+        return new LobbySnapshot(players, cheatsEnabled, goal);
     }
 
     private void publishSnapshot() {
@@ -239,6 +285,10 @@ final class LobbyHost implements AutoCloseable {
 
         private synchronized void sendGo(long startAtEpochMillis) throws IOException {
             LobbyProtocol.writeGo(out, startAtEpochMillis);
+        }
+
+        private synchronized void sendResult(LobbyRaceResult result) throws IOException {
+            LobbyProtocol.writeRaceFinished(out, result);
         }
     }
 }
