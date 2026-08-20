@@ -32,7 +32,7 @@ public final class JoinLobbyScreen extends Screen {
         this.addRenderableWidget(Button.builder(Component.literal("ПОДКЛЮЧИТЬСЯ"), button -> joinLobby())
             .bounds(centerX - 120, y + 32, 240, 20).build());
 
-        this.addRenderableWidget(Button.builder(Component.literal("НАЗАД"), button -> Minecraft.getInstance().setScreen(parent))
+        this.addRenderableWidget(Button.builder(Component.literal("НАЗАД"), button -> Minecraft.getInstance().gui.setScreen(parent))
             .bounds(centerX - 120, y + 58, 240, 20).build());
     }
 
@@ -47,7 +47,7 @@ public final class JoinLobbyScreen extends Screen {
 
         String playerName = Minecraft.getInstance().getUser().getName();
         LobbyService.get().join(endpoint.host(), endpoint.port(), playerName);
-        Minecraft.getInstance().setScreen(new LobbyRoomScreen());
+        Minecraft.getInstance().gui.setScreen(new LobbyRoomScreen());
     }
 
     @Override

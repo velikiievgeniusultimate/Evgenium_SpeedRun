@@ -31,7 +31,7 @@ public final class CreateLobbyScreen extends Screen {
         this.addRenderableWidget(Button.builder(Component.literal("СОЗДАТЬ"), button -> createLobby())
             .bounds(centerX - 100, y + 32, 200, 20).build());
 
-        this.addRenderableWidget(Button.builder(Component.literal("НАЗАД"), button -> Minecraft.getInstance().setScreen(parent))
+        this.addRenderableWidget(Button.builder(Component.literal("НАЗАД"), button -> Minecraft.getInstance().gui.setScreen(parent))
             .bounds(centerX - 100, y + 58, 200, 20).build());
     }
 
@@ -54,7 +54,7 @@ public final class CreateLobbyScreen extends Screen {
             this.error = failure;
             return;
         }
-        Minecraft.getInstance().setScreen(new LobbyRoomScreen());
+        Minecraft.getInstance().gui.setScreen(new LobbyRoomScreen());
     }
 
     @Override

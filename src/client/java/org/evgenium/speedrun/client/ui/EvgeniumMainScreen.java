@@ -22,11 +22,11 @@ public final class EvgeniumMainScreen extends Screen {
         int y = Math.max(92, this.height / 2 - 48);
 
         this.addRenderableWidget(Button.builder(Component.literal("СОЗДАТЬ ЛОББИ"), button ->
-                Minecraft.getInstance().setScreen(new CreateLobbyScreen(this)))
+                Minecraft.getInstance().gui.setScreen(new CreateLobbyScreen(this)))
             .bounds(x, y, BUTTON_WIDTH, BUTTON_HEIGHT).build());
 
         this.addRenderableWidget(Button.builder(Component.literal("ЗАЙТИ В ЛОББИ"), button ->
-                Minecraft.getInstance().setScreen(new JoinLobbyScreen(this)))
+                Minecraft.getInstance().gui.setScreen(new JoinLobbyScreen(this)))
             .bounds(x, y + BUTTON_HEIGHT + GAP, BUTTON_WIDTH, BUTTON_HEIGHT).build());
 
         Button training = Button.builder(Component.literal("ОДИНОЧНАЯ ТРЕНИРОВКА — СКОРО"), button -> {})
@@ -35,7 +35,7 @@ public final class EvgeniumMainScreen extends Screen {
         this.addRenderableWidget(training);
 
         this.addRenderableWidget(Button.builder(Component.literal("ВЕРНУТЬСЯ К ВАНИЛЬНОМУ МЕНЮ"), button ->
-                Minecraft.getInstance().setScreen(new TitleScreen()))
+                Minecraft.getInstance().gui.setScreen(new TitleScreen()))
             .bounds(x, y + 3 * (BUTTON_HEIGHT + GAP), BUTTON_WIDTH, BUTTON_HEIGHT).build());
     }
 

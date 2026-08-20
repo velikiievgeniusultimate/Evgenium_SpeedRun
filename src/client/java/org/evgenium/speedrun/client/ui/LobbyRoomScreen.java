@@ -29,7 +29,7 @@ public final class LobbyRoomScreen extends Screen {
 
     private void leaveLobby() {
         LobbyService.get().leave();
-        Minecraft.getInstance().setScreen(new EvgeniumMainScreen());
+        Minecraft.getInstance().gui.setScreen(new EvgeniumMainScreen());
     }
 
     @Override

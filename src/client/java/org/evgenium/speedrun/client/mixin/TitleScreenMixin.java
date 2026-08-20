@@ -20,7 +20,7 @@ public abstract class TitleScreenMixin extends Screen {
     @Inject(method = "init", at = @At("TAIL"))
     private void evgenium$addSpeedrunLobbyButton(CallbackInfo info) {
         this.addRenderableWidget(Button.builder(Component.literal("Выбрать лобби спидранов"), button ->
-                Minecraft.getInstance().setScreen(new EvgeniumMainScreen()))
+                Minecraft.getInstance().gui.setScreen(new EvgeniumMainScreen()))
             .bounds(4, 4, 210, 20)
             .build());
     }

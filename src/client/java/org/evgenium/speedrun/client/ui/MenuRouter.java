@@ -12,9 +12,9 @@ public final class MenuRouter {
 
     public static void install() {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (!initialRedirectDone && client.screen instanceof TitleScreen) {
+            if (!initialRedirectDone && client.gui.screen() instanceof TitleScreen) {
                 initialRedirectDone = true;
-                client.setScreen(new EvgeniumMainScreen());
+                client.gui.setScreen(new EvgeniumMainScreen());
             }
         });
     }
