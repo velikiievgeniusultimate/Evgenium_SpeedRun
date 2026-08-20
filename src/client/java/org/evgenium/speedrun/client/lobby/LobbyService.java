@@ -3,6 +3,7 @@ package org.evgenium.speedrun.client.lobby;
 import net.minecraft.client.Minecraft;
 import org.evgenium.speedrun.EvgeniumSpeedRun;
 import org.evgenium.speedrun.client.match.AdvancementChat;
+import org.evgenium.speedrun.client.match.RaceClockSync;
 import org.evgenium.speedrun.client.match.RaceSession;
 import org.evgenium.speedrun.client.match.SpeedrunWorldLauncher;
 import org.evgenium.speedrun.client.spectator.SpectatorRelayClient;
@@ -59,6 +60,7 @@ public final class LobbyService {
             this.error = false;
             this.status = "Лобби открыто. Ожидание игроков";
             this.endpointText = "Адрес в локальной сети: " + NetworkAddresses.bestLocalIpv4() + ":" + port;
+            RaceClockSync.becomeHost();
             ClientRuntime.transitionTo(ClientPhase.LOBBY);
             EvgeniumSpeedRun.LOGGER.info(
                 "Lobby opened on TCP port {} (cheats={}, randomization={})",
@@ -83,17 +85,21 @@ public final class LobbyService {
         this.snapshot = LobbySnapshot.empty();
         this.endpointText = "Хозяин: " + hostName + ":" + port;
         this.status = "Подключение...";
+        RaceClockSync.beginGuest();
         this.client = new LobbyClient(
             hostName,
             port,
             playerName,
             snapshot -> this.snapshot = snapshot,
             this::acceptRun,
+            this::acceptResume,
             this::acceptGo,
             this::acceptFinishUpdate,
             this::acceptAdvancement,
             tunnelId -> SpectatorRelayClient.openTargetTunnel(hostName, port, tunnelId),
-            this::acceptClientStatus
+            this::acceptClientStatus,
+            this::acceptClientConnection,
+            RaceClockSync::acceptSample
         );
         this.client.startAsync();
         ClientRuntime.transitionTo(ClientPhase.LOBBY);
@@ -130,8 +136,6 @@ public final class LobbyService {
         RandomizationType previous = configuredRandomizationType;
         configuredRandomizationType = type == null ? RandomizationType.MCSR_LIKE : type;
 
-        // Re-publish the host snapshot through the existing pre-run rules path.
-        // LobbyHost's 3-argument LobbySnapshot constructor reads configuredRandomizationType().
         if (!host.setGoal(snapshot.goal())) {
             configuredRandomizationType = previous;
             return "Нельзя менять рандомизацию после начала подготовки забега";
@@ -153,10 +157,6 @@ public final class LobbyService {
 
         results.clear();
         long worldSeed = ThreadLocalRandom.current().nextLong();
-
-        // Foundation rule: RNG seed is a separate protocol/session field from day one,
-        // but ruleset R1 intentionally initializes it to the world seed. Later stages may
-        // choose an independent value without another structural rewrite.
         long rngSeed = worldSeed;
 
         LobbyRunConfig config = new LobbyRunConfig(
@@ -185,6 +185,42 @@ public final class LobbyService {
         this.status = "Создание мира. World Seed: " + config.worldSeed() + " • RNG Seed: " + config.rngSeed();
         this.error = false;
         Minecraft.getInstance().execute(() -> SpeedrunWorldLauncher.launch(config));
+    }
+
+    private synchronized void acceptResume(LobbyResumeState resume) {
+        LobbyRunConfig config = resume.config();
+        this.status = "Связь восстановлена. Синхронизация забега...";
+        this.error = false;
+
+        Minecraft.getInstance().execute(() -> {
+            if (!RaceSession.hasRunConfig()) {
+                SpeedrunWorldLauncher.launch(config);
+                return;
+            }
+            if (!RaceSession.matchesConfig(config)) {
+                this.status = "Ошибка: reconnect получил другой конфиг забега";
+                this.error = true;
+                return;
+            }
+
+            for (LobbyRaceResult result : resume.results()) {
+                boolean exists = results.stream().anyMatch(existing -> existing.playerName().equals(result.playerName()));
+                if (!exists) {
+                    results.add(result);
+                    RaceSession.onFinishUpdate(result);
+                }
+            }
+
+            if (resume.goIssued()) {
+                RaceSession.resynchronizeGo(resume.goAtEpochMillis());
+            } else {
+                RaceSession.clearGoWhilePreparing();
+                LobbyClient current = client;
+                if (current != null && RaceSession.isReadyReported()) {
+                    current.sendReady();
+                }
+            }
+        });
     }
 
     public synchronized void reportWorldReady() {
@@ -241,7 +277,22 @@ public final class LobbyService {
 
     private void acceptClientStatus(String newStatus) {
         this.status = newStatus;
-        this.error = newStatus.startsWith("Ошибка") || newStatus.contains("закрыто хозяином");
+        this.error = newStatus.startsWith("Ошибка") || newStatus.contains("потеряна") || newStatus.contains("timeout");
+    }
+
+    private void acceptClientConnection(boolean connected) {
+        if (connected) {
+            RaceClockSync.onControlConnected();
+        } else {
+            RaceClockSync.onControlDisconnected("Связь с хостом потеряна");
+        }
+    }
+
+    public synchronized void forceReconnect() {
+        if (client != null) {
+            status = "Принудительное переподключение...";
+            client.forceReconnect();
+        }
     }
 
     public List<LobbyRaceResult> results() {
@@ -251,6 +302,9 @@ public final class LobbyService {
     public List<String> runningPlayerNames() {
         List<String> running = new ArrayList<>();
         for (LobbyPlayer player : snapshot.players()) {
+            if (!player.connected()) {
+                continue;
+            }
             boolean finished = results.stream().anyMatch(result -> result.playerName().equals(player.name()));
             if (!finished) {
                 running.add(player.name());
@@ -285,6 +339,7 @@ public final class LobbyService {
             host.close();
             host = null;
         }
+        RaceClockSync.reset();
         configuredRandomizationType = RandomizationType.MCSR_LIKE;
         snapshot = LobbySnapshot.empty();
         results.clear();
