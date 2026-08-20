@@ -18,6 +18,14 @@ public final class LobbyRoomScreen extends Screen {
     protected void init() {
         int centerX = this.width / 2;
         LobbyService service = LobbyService.get();
+        LobbySnapshot snapshot = service.snapshot();
+
+        Button goal = Button.builder(Component.literal("ЦЕЛЬ: " + snapshot.goal().displayName()), button ->
+                Minecraft.getInstance().gui.setScreen(new GoalSelectionScreen()))
+            .bounds(centerX - 110, 88, 220, 20)
+            .build();
+        goal.active = service.isHosting();
+        this.addRenderableWidget(goal);
 
         Button start = Button.builder(Component.literal(service.isHosting() ? "НАЧАТЬ ЗАБЕГ" : "ЖДЁМ ХОЗЯИНА"), button -> {
                 button.active = false;
@@ -51,20 +59,23 @@ public final class LobbyRoomScreen extends Screen {
         LobbySnapshot snapshot = service.snapshot();
 
         String title = service.isHosting() ? "ЛОББИ — ХОЗЯИН" : "ЛОББИ";
-        graphics.text(this.font, title, (this.width - this.font.width(title)) / 2, 26, 0xFFFFFFFF, true);
+        graphics.text(this.font, title, (this.width - this.font.width(title)) / 2, 22, 0xFFFFFFFF, true);
 
         String endpoint = service.endpointText();
-        graphics.text(this.font, endpoint, (this.width - this.font.width(endpoint)) / 2, 44, 0xFFBBBBBB, false);
+        graphics.text(this.font, endpoint, (this.width - this.font.width(endpoint)) / 2, 40, 0xFFBBBBBB, false);
 
-        String rules = "Режим: Survival • Сложность: Easy • Читы: " + (snapshot.cheatsEnabled() ? "ВКЛ (ОТЛАДКА)" : "ВЫКЛ");
-        graphics.text(this.font, rules, (this.width - this.font.width(rules)) / 2, 60, snapshot.cheatsEnabled() ? 0xFFFFCC66 : 0xFFAAAAAA, false);
+        String rules = "Survival • Easy • Читы: " + (snapshot.cheatsEnabled() ? "ВКЛ (ОТЛАДКА)" : "ВЫКЛ");
+        graphics.text(this.font, rules, (this.width - this.font.width(rules)) / 2, 56, snapshot.cheatsEnabled() ? 0xFFFFCC66 : 0xFFAAAAAA, false);
+
+        String selectedGoal = "Цель: " + snapshot.goal().displayName();
+        graphics.text(this.font, selectedGoal, (this.width - this.font.width(selectedGoal)) / 2, 72, 0xFFFFFFFF, false);
 
         String status = service.status();
         int statusColor = service.hasError() ? 0xFFFF7777 : 0xFFAAAAAA;
-        graphics.text(this.font, status, (this.width - this.font.width(status)) / 2, 76, statusColor, false);
+        graphics.text(this.font, status, (this.width - this.font.width(status)) / 2, 114, statusColor, false);
 
         int listX = Math.max(20, this.width / 2 - 150);
-        int y = 102;
+        int y = 138;
         graphics.text(this.font, "Игроки: " + snapshot.players().size(), listX, y, 0xFFFFFFFF, true);
         y += 18;
         for (LobbyPlayer player : snapshot.players()) {

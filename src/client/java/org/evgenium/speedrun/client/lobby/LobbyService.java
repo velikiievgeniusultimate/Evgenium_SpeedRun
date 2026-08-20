@@ -31,7 +31,15 @@ public final class LobbyService {
     public synchronized String host(int port, String playerName, boolean cheatsEnabled) {
         leave();
         try {
-            LobbyHost newHost = new LobbyHost(port, playerName, cheatsEnabled, snapshot -> this.snapshot = snapshot, this::acceptRun, this::acceptGo);
+            LobbyHost newHost = new LobbyHost(
+                port,
+                playerName,
+                cheatsEnabled,
+                snapshot -> this.snapshot = snapshot,
+                this::acceptRun,
+                this::acceptGo,
+                this::acceptRaceResult
+            );
             newHost.start();
             this.host = newHost;
             this.hosting = true;
@@ -55,9 +63,30 @@ public final class LobbyService {
         this.snapshot = LobbySnapshot.empty();
         this.endpointText = "Хозяин: " + hostName + ":" + port;
         this.status = "Подключение...";
-        this.client = new LobbyClient(hostName, port, playerName, snapshot -> this.snapshot = snapshot, this::acceptRun, this::acceptGo, this::acceptClientStatus);
+        this.client = new LobbyClient(
+            hostName,
+            port,
+            playerName,
+            snapshot -> this.snapshot = snapshot,
+            this::acceptRun,
+            this::acceptGo,
+            this::acceptRaceResult,
+            this::acceptClientStatus
+        );
         this.client.startAsync();
         ClientRuntime.transitionTo(ClientPhase.LOBBY);
+    }
+
+    public synchronized String selectGoal(SpeedrunGoal goal) {
+        if (!hosting || host == null) {
+            return "Менять цель может только хозяин лобби";
+        }
+        if (!host.setGoal(goal)) {
+            return "Нельзя менять цель после начала подготовки забега";
+        }
+        this.status = "Цель выбрана: " + goal.displayName();
+        this.error = false;
+        return null;
     }
 
     public synchronized String startRun() {
@@ -66,10 +95,15 @@ public final class LobbyService {
         }
 
         long seed = ThreadLocalRandom.current().nextLong();
-        LobbyRunConfig config = new LobbyRunConfig(seed, snapshot.cheatsEnabled());
+        LobbyRunConfig config = new LobbyRunConfig(seed, snapshot.cheatsEnabled(), snapshot.goal());
         this.status = "Создание миров. Seed: " + seed;
         this.error = false;
-        EvgeniumSpeedRun.LOGGER.info("Preparing synchronized speedrun with seed {} (cheats={})", seed, config.cheatsEnabled());
+        EvgeniumSpeedRun.LOGGER.info(
+            "Preparing synchronized speedrun with seed {} (goal={}, cheats={})",
+            seed,
+            config.goal().id(),
+            config.cheatsEnabled()
+        );
         host.startRun(config);
         return null;
     }
@@ -94,6 +128,22 @@ public final class LobbyService {
         this.status = "Все готовы. Старт!";
         this.error = false;
         Minecraft.getInstance().execute(() -> RaceSession.scheduleGo(startAtEpochMillis));
+    }
+
+    public synchronized void reportRaceFinish(long elapsedMillis) {
+        this.status = "Финиш отправлен хозяину...";
+        this.error = false;
+        if (hosting && host != null) {
+            host.markHostFinished(elapsedMillis);
+        } else if (client != null) {
+            client.sendFinish(elapsedMillis);
+        }
+    }
+
+    private void acceptRaceResult(LobbyRaceResult result) {
+        this.status = "Победитель: " + result.winnerName();
+        this.error = false;
+        Minecraft.getInstance().execute(() -> RaceSession.finish(result));
     }
 
     private void acceptClientStatus(String newStatus) {

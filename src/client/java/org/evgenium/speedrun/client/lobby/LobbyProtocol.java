@@ -8,13 +8,15 @@ import java.util.List;
 
 final class LobbyProtocol {
     static final int MAGIC = 0x45565352; // EVSR
-    static final int VERSION = 3;
+    static final int VERSION = 4;
     static final byte STATE = 10;
     static final byte ERROR = 11;
     static final byte START_RUN = 12;
     static final byte GO = 13;
+    static final byte RACE_FINISHED = 14;
     static final byte LEAVE = 20;
     static final byte READY = 21;
+    static final byte FINISH = 22;
 
     private LobbyProtocol() {
     }
@@ -44,6 +46,7 @@ final class LobbyProtocol {
     static void writeState(DataOutputStream out, LobbySnapshot snapshot) throws IOException {
         out.writeByte(STATE);
         out.writeBoolean(snapshot.cheatsEnabled());
+        out.writeUTF(snapshot.goal().id());
         out.writeInt(snapshot.players().size());
         for (LobbyPlayer player : snapshot.players()) {
             out.writeUTF(player.name());
@@ -54,6 +57,12 @@ final class LobbyProtocol {
 
     static LobbySnapshot readState(DataInputStream in) throws IOException {
         boolean cheatsEnabled = in.readBoolean();
+        SpeedrunGoal goal;
+        try {
+            goal = SpeedrunGoal.fromId(in.readUTF());
+        } catch (IllegalArgumentException exception) {
+            throw new IOException(exception.getMessage(), exception);
+        }
         int count = in.readInt();
         if (count < 0 || count > 128) {
             throw new IOException("Некорректный размер лобби");
@@ -62,18 +71,25 @@ final class LobbyProtocol {
         for (int i = 0; i < count; i++) {
             players.add(new LobbyPlayer(in.readUTF(), in.readBoolean()));
         }
-        return new LobbySnapshot(players, cheatsEnabled);
+        return new LobbySnapshot(players, cheatsEnabled, goal);
     }
 
     static void writeStartRun(DataOutputStream out, LobbyRunConfig config) throws IOException {
         out.writeByte(START_RUN);
         out.writeLong(config.seed());
         out.writeBoolean(config.cheatsEnabled());
+        out.writeUTF(config.goal().id());
         out.flush();
     }
 
     static LobbyRunConfig readStartRun(DataInputStream in) throws IOException {
-        return new LobbyRunConfig(in.readLong(), in.readBoolean());
+        long seed = in.readLong();
+        boolean cheatsEnabled = in.readBoolean();
+        try {
+            return new LobbyRunConfig(seed, cheatsEnabled, SpeedrunGoal.fromId(in.readUTF()));
+        } catch (IllegalArgumentException exception) {
+            throw new IOException(exception.getMessage(), exception);
+        }
     }
 
     static void writeReady(DataOutputStream out) throws IOException {
@@ -89,6 +105,37 @@ final class LobbyProtocol {
 
     static long readGo(DataInputStream in) throws IOException {
         return in.readLong();
+    }
+
+    static void writeFinish(DataOutputStream out, long elapsedMillis) throws IOException {
+        out.writeByte(FINISH);
+        out.writeLong(elapsedMillis);
+        out.flush();
+    }
+
+    static long readFinish(DataInputStream in) throws IOException {
+        long elapsedMillis = in.readLong();
+        if (elapsedMillis < 0L) {
+            throw new IOException("Некорректное время финиша");
+        }
+        return elapsedMillis;
+    }
+
+    static void writeRaceFinished(DataOutputStream out, LobbyRaceResult result) throws IOException {
+        out.writeByte(RACE_FINISHED);
+        out.writeUTF(result.winnerName());
+        out.writeLong(result.elapsedMillis());
+        out.flush();
+    }
+
+    static LobbyRaceResult readRaceFinished(DataInputStream in) throws IOException {
+        String winnerName = in.readUTF();
+        long elapsedMillis = in.readLong();
+        try {
+            return new LobbyRaceResult(winnerName, elapsedMillis);
+        } catch (IllegalArgumentException exception) {
+            throw new IOException("Некорректный результат гонки", exception);
+        }
     }
 
     static void writeError(DataOutputStream out, String message) throws IOException {
