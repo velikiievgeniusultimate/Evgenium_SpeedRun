@@ -4,6 +4,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.GameType;
 import org.evgenium.speedrun.EvgeniumSpeedRun;
 import org.evgenium.speedrun.client.lobby.LobbyRaceResult;
 import org.evgenium.speedrun.client.lobby.LobbyRunConfig;
@@ -11,9 +12,10 @@ import org.evgenium.speedrun.client.lobby.LobbyService;
 import org.evgenium.speedrun.client.lobby.SpeedrunGoal;
 import org.evgenium.speedrun.client.runtime.ClientPhase;
 import org.evgenium.speedrun.client.runtime.ClientRuntime;
-import org.evgenium.speedrun.client.ui.RaceResultScreen;
 import org.evgenium.speedrun.client.ui.RaceWaitingScreen;
+import org.evgenium.speedrun.spectator.SpectatorItems;
 
+import java.util.Locale;
 import java.util.UUID;
 
 public final class RaceSession {
@@ -22,10 +24,11 @@ public final class RaceSession {
     private static volatile boolean readyReported;
     private static volatile boolean running;
     private static volatile boolean finishReported;
-    private static volatile boolean finished;
+    private static volatile boolean localFinished;
     private static volatile long goAtEpochMillis = -1L;
     private static volatile long startNanoTime = -1L;
     private static volatile long finalElapsedNanos = -1L;
+    private static volatile int localPlace = -1;
 
     private RaceSession() {
     }
@@ -36,10 +39,11 @@ public final class RaceSession {
         readyReported = false;
         running = false;
         finishReported = false;
-        finished = false;
+        localFinished = false;
         goAtEpochMillis = -1L;
         startNanoTime = -1L;
         finalElapsedNanos = -1L;
+        localPlace = -1;
     }
 
     public static void onWorldJoined(Minecraft minecraft) {
@@ -115,7 +119,7 @@ public final class RaceSession {
 
     public static void onWinScreenOpened() {
         LobbyRunConfig currentConfig = config;
-        if (!running || finished || finishReported || currentConfig == null) {
+        if (!running || localFinished || finishReported || currentConfig == null) {
             return;
         }
         if (currentConfig.goal() != SpeedrunGoal.COMPLETE_MINECRAFT) {
@@ -128,16 +132,55 @@ public final class RaceSession {
         LobbyService.get().reportRaceFinish(elapsedMillis);
     }
 
-    public static void finish(LobbyRaceResult result) {
-        if (finished) {
+    public static void onFinishUpdate(LobbyRaceResult result) {
+        String localName = Minecraft.getInstance().getUser().getName();
+        if (result.playerName().equals(localName)) {
+            finishLocal(result);
             return;
         }
-        finished = true;
+
+        String title = result.playerName() + " занял " + result.place() + " место";
+        if (running) {
+            int nextPlace = result.place() + 1;
+            RaceNotificationHud.show(title, "Ты продолжаешь гонку за " + nextPlace + " место");
+        } else {
+            RaceNotificationHud.show(title, "Гонка продолжается");
+        }
+    }
+
+    private static void finishLocal(LobbyRaceResult result) {
+        if (localFinished) {
+            return;
+        }
+
+        localFinished = true;
         running = false;
         waitingForGo = false;
+        localPlace = result.place();
         finalElapsedNanos = result.elapsedMillis() * 1_000_000L;
         ClientRuntime.transitionTo(ClientPhase.FINISHED);
-        Minecraft.getInstance().gui.setScreen(new RaceResultScreen(result));
+        RaceNotificationHud.show(
+            "ФИНИШ — " + result.place() + " место",
+            "Время: " + formatMillis(result.elapsedMillis()) + " • теперь ты наблюдатель"
+        );
+
+        Minecraft minecraft = Minecraft.getInstance();
+        MinecraftServer server = minecraft.getSingleplayerServer();
+        if (server != null && minecraft.player != null) {
+            UUID playerId = minecraft.player.getUUID();
+            server.execute(() -> {
+                ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+                if (player == null) {
+                    return;
+                }
+                player.getInventory().clearContent();
+                player.setGameMode(GameType.SPECTATOR);
+                player.getInventory().setItem(0, SpectatorItems.createSelector());
+                player.getInventory().setSelectedSlot(0);
+            });
+        }
+
+        minecraft.execute(() -> minecraft.gui.setScreen(null));
     }
 
     public static boolean isWaitingForGo() {
@@ -163,17 +206,38 @@ public final class RaceSession {
         return running;
     }
 
-    public static boolean isFinished() {
-        return finished;
+    public static boolean isLocalFinished() {
+        return localFinished;
+    }
+
+    public static int localPlace() {
+        return localPlace;
+    }
+
+    public static boolean shouldShowTimer() {
+        return running || localFinished;
     }
 
     public static long elapsedNanos() {
-        if (finished && finalElapsedNanos >= 0L) {
+        if (localFinished && finalElapsedNanos >= 0L) {
             return finalElapsedNanos;
         }
         if (!running || startNanoTime <= 0L) {
             return 0L;
         }
         return Math.max(0L, System.nanoTime() - startNanoTime);
+    }
+
+    private static String formatMillis(long totalMillis) {
+        long millis = totalMillis % 1000L;
+        long totalSeconds = totalMillis / 1000L;
+        long seconds = totalSeconds % 60L;
+        long totalMinutes = totalSeconds / 60L;
+        long minutes = totalMinutes % 60L;
+        long hours = totalMinutes / 60L;
+        if (hours > 0L) {
+            return String.format(Locale.ROOT, "%d:%02d:%02d.%03d", hours, minutes, seconds, millis);
+        }
+        return String.format(Locale.ROOT, "%02d:%02d.%03d", minutes, seconds, millis);
     }
 }
