@@ -1,7 +1,5 @@
 package org.evgenium.speedrun.client.lobby;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.EOFException;
@@ -19,6 +17,7 @@ final class LobbyClient implements AutoCloseable {
     private final Consumer<LobbyRunConfig> runConsumer;
     private final LongConsumer goConsumer;
     private final Consumer<LobbyRaceResult> resultConsumer;
+    private final LongConsumer tunnelRequestConsumer;
     private final Consumer<String> statusConsumer;
     private volatile boolean running;
     private Socket socket;
@@ -26,7 +25,8 @@ final class LobbyClient implements AutoCloseable {
 
     LobbyClient(String host, int port, String playerName, Consumer<LobbySnapshot> snapshotConsumer,
                 Consumer<LobbyRunConfig> runConsumer, LongConsumer goConsumer,
-                Consumer<LobbyRaceResult> resultConsumer, Consumer<String> statusConsumer) {
+                Consumer<LobbyRaceResult> resultConsumer, LongConsumer tunnelRequestConsumer,
+                Consumer<String> statusConsumer) {
         this.host = host;
         this.port = port;
         this.playerName = playerName;
@@ -34,7 +34,16 @@ final class LobbyClient implements AutoCloseable {
         this.runConsumer = runConsumer;
         this.goConsumer = goConsumer;
         this.resultConsumer = resultConsumer;
+        this.tunnelRequestConsumer = tunnelRequestConsumer;
         this.statusConsumer = statusConsumer;
+    }
+
+    String host() {
+        return host;
+    }
+
+    int port() {
+        return port;
     }
 
     void startAsync() {
@@ -52,8 +61,8 @@ final class LobbyClient implements AutoCloseable {
             newSocket.setTcpNoDelay(true);
             this.socket = newSocket;
 
-            try (DataInputStream in = new DataInputStream(new BufferedInputStream(newSocket.getInputStream()))) {
-                this.out = new DataOutputStream(new BufferedOutputStream(newSocket.getOutputStream()));
+            try (DataInputStream in = new DataInputStream(newSocket.getInputStream())) {
+                this.out = new DataOutputStream(newSocket.getOutputStream());
                 LobbyProtocol.writeHello(out, playerName);
                 statusConsumer.accept("Подключено");
 
@@ -65,8 +74,10 @@ final class LobbyClient implements AutoCloseable {
                         runConsumer.accept(LobbyProtocol.readStartRun(in));
                     } else if (message == LobbyProtocol.GO) {
                         goConsumer.accept(LobbyProtocol.readGo(in));
-                    } else if (message == LobbyProtocol.RACE_FINISHED) {
-                        resultConsumer.accept(LobbyProtocol.readRaceFinished(in));
+                    } else if (message == LobbyProtocol.FINISH_UPDATE) {
+                        resultConsumer.accept(LobbyProtocol.readFinishUpdate(in));
+                    } else if (message == LobbyProtocol.OPEN_SPECTATOR_TUNNEL) {
+                        tunnelRequestConsumer.accept(LobbyProtocol.readOpenSpectatorTunnel(in));
                     } else if (message == LobbyProtocol.ERROR) {
                         throw new IOException(in.readUTF());
                     } else {
