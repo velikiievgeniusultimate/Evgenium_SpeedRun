@@ -5,10 +5,13 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import org.evgenium.speedrun.EvgeniumSpeedRun;
+import org.evgenium.speedrun.client.lobby.LobbyRaceResult;
 import org.evgenium.speedrun.client.lobby.LobbyRunConfig;
 import org.evgenium.speedrun.client.lobby.LobbyService;
+import org.evgenium.speedrun.client.lobby.SpeedrunGoal;
 import org.evgenium.speedrun.client.runtime.ClientPhase;
 import org.evgenium.speedrun.client.runtime.ClientRuntime;
+import org.evgenium.speedrun.client.ui.RaceResultScreen;
 import org.evgenium.speedrun.client.ui.RaceWaitingScreen;
 
 import java.util.UUID;
@@ -18,8 +21,11 @@ public final class RaceSession {
     private static volatile boolean waitingForGo;
     private static volatile boolean readyReported;
     private static volatile boolean running;
+    private static volatile boolean finishReported;
+    private static volatile boolean finished;
     private static volatile long goAtEpochMillis = -1L;
     private static volatile long startNanoTime = -1L;
+    private static volatile long finalElapsedNanos = -1L;
 
     private RaceSession() {
     }
@@ -29,8 +35,11 @@ public final class RaceSession {
         waitingForGo = false;
         readyReported = false;
         running = false;
+        finishReported = false;
+        finished = false;
         goAtEpochMillis = -1L;
         startNanoTime = -1L;
+        finalElapsedNanos = -1L;
     }
 
     public static void onWorldJoined(Minecraft minecraft) {
@@ -104,6 +113,33 @@ public final class RaceSession {
         }
     }
 
+    public static void onWinScreenOpened() {
+        LobbyRunConfig currentConfig = config;
+        if (!running || finished || finishReported || currentConfig == null) {
+            return;
+        }
+        if (currentConfig.goal() != SpeedrunGoal.COMPLETE_MINECRAFT) {
+            return;
+        }
+
+        finishReported = true;
+        long elapsedMillis = elapsedNanos() / 1_000_000L;
+        EvgeniumSpeedRun.LOGGER.info("Completed Minecraft goal locally in {} ms; reporting finish", elapsedMillis);
+        LobbyService.get().reportRaceFinish(elapsedMillis);
+    }
+
+    public static void finish(LobbyRaceResult result) {
+        if (finished) {
+            return;
+        }
+        finished = true;
+        running = false;
+        waitingForGo = false;
+        finalElapsedNanos = result.elapsedMillis() * 1_000_000L;
+        ClientRuntime.transitionTo(ClientPhase.FINISHED);
+        Minecraft.getInstance().gui.setScreen(new RaceResultScreen(result));
+    }
+
     public static boolean isWaitingForGo() {
         return waitingForGo;
     }
@@ -127,7 +163,14 @@ public final class RaceSession {
         return running;
     }
 
+    public static boolean isFinished() {
+        return finished;
+    }
+
     public static long elapsedNanos() {
+        if (finished && finalElapsedNanos >= 0L) {
+            return finalElapsedNanos;
+        }
         if (!running || startNanoTime <= 0L) {
             return 0L;
         }
