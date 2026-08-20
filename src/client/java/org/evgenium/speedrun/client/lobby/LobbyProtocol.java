@@ -8,7 +8,7 @@ import java.util.List;
 
 final class LobbyProtocol {
     static final int MAGIC = 0x45565352; // EVSR
-    static final int VERSION = 5;
+    static final int VERSION = 6;
 
     static final byte CHANNEL_CONTROL = 1;
     static final byte CHANNEL_SPECTATOR_SOURCE = 2;

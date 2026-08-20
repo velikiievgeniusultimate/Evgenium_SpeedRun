@@ -12,8 +12,8 @@ import org.evgenium.speedrun.client.lobby.LobbyService;
 import org.evgenium.speedrun.client.lobby.SpeedrunGoal;
 import org.evgenium.speedrun.client.runtime.ClientPhase;
 import org.evgenium.speedrun.client.runtime.ClientRuntime;
+import org.evgenium.speedrun.client.spectator.SpectatorRelayClient;
 import org.evgenium.speedrun.client.ui.RaceWaitingScreen;
-import org.evgenium.speedrun.spectator.SpectatorItems;
 
 import java.util.Locale;
 import java.util.UUID;
@@ -62,13 +62,13 @@ public final class RaceSession {
             return;
         }
 
-        server.execute(() -> normalizeSpawnAndReportReady(minecraft, server, playerId));
+        server.execute(() -> normalizeSpawnAndPrepareNetwork(minecraft, server, playerId));
     }
 
-    private static void normalizeSpawnAndReportReady(Minecraft minecraft, MinecraftServer server, UUID playerId) {
+    private static void normalizeSpawnAndPrepareNetwork(Minecraft minecraft, MinecraftServer server, UUID playerId) {
         ServerPlayer player = server.getPlayerList().getPlayer(playerId);
         if (player == null) {
-            minecraft.execute(RaceSession::reportReady);
+            minecraft.execute(() -> SpectatorRelayClient.prepareLocalRunnerWorld(RaceSession::reportReady));
             return;
         }
 
@@ -79,7 +79,10 @@ public final class RaceSession {
 
         player.connection.teleport(x, y, z, 0.0F, 0.0F);
         EvgeniumSpeedRun.LOGGER.info("Normalized speedrun spawn to {}, {}, {}", x, y, z);
-        minecraft.execute(RaceSession::reportReady);
+
+        // READY is delayed until the integrated server has been published for spectator relay.
+        // This guarantees that every runner world is already multiplayer-capable before GO.
+        minecraft.execute(() -> SpectatorRelayClient.prepareLocalRunnerWorld(RaceSession::reportReady));
     }
 
     private static void reportReady() {
@@ -173,10 +176,11 @@ public final class RaceSession {
                 if (player == null) {
                     return;
                 }
+
+                // The real inventory is wiped and remains empty. Vanilla spectator mode hides
+                // it completely, so Evgenium renders one virtual selector slot client-side.
                 player.getInventory().clearContent();
                 player.setGameMode(GameType.SPECTATOR);
-                player.getInventory().setItem(0, SpectatorItems.createSelector());
-                player.getInventory().setSelectedSlot(0);
             });
         }
 

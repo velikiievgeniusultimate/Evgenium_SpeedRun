@@ -3,7 +3,6 @@ package org.evgenium.speedrun.client.spectator;
 import net.minecraft.client.Minecraft;
 import org.evgenium.speedrun.client.match.RaceSession;
 import org.evgenium.speedrun.client.ui.SpectatorTargetScreen;
-import org.evgenium.speedrun.spectator.SpectatorItems;
 
 public final class SpectatorController {
     private SpectatorController() {
@@ -11,15 +10,17 @@ public final class SpectatorController {
 
     public static void tick(Minecraft minecraft) {
         SpectatorRelayClient.tick(minecraft);
-        if (!RaceSession.isLocalFinished() || minecraft.player == null || minecraft.gui.screen() != null) {
+        if (!RaceSession.isLocalFinished()
+            || minecraft.player == null
+            || !minecraft.player.isSpectator()
+            || minecraft.gui.screen() != null) {
             return;
         }
-        if (!minecraft.options.keyUse.consumeClick()) {
-            return;
+
+        // The finished-player inventory is intentionally virtual: vanilla spectator mode has
+        // no normal hotbar. Right click always activates our single selector slot.
+        if (minecraft.options.keyUse.consumeClick()) {
+            minecraft.gui.setScreen(new SpectatorTargetScreen());
         }
-        if (!SpectatorItems.isSelector(minecraft.player.getInventory().getSelectedItem())) {
-            return;
-        }
-        minecraft.gui.setScreen(new SpectatorTargetScreen());
     }
 }

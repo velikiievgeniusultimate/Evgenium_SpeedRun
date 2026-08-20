@@ -3,8 +3,8 @@ package org.evgenium.speedrun.client.spectator;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.multiplayer.ServerData;
-import net.minecraft.client.multiplayer.TransferState;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
+import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.network.protocol.game.ServerboundTeleportToEntityPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.player.Player;
@@ -21,7 +21,6 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -35,6 +34,36 @@ public final class SpectatorRelayClient {
 
     public static String currentTarget() {
         return currentTarget;
+    }
+
+    /**
+     * Publishes the runner's integrated server before READY is sent.
+     *
+     * The world therefore behaves as a real multiplayer-capable integrated server for the
+     * whole race. Evgenium's pause controller is responsible for freezing gameplay on ESC;
+     * we deliberately do not depend on vanilla singleplayer pause semantics anymore.
+     */
+    public static void prepareLocalRunnerWorld(Runnable onReady) {
+        Minecraft minecraft = Minecraft.getInstance();
+        IntegratedServer server = minecraft.getSingleplayerServer();
+        if (server == null) {
+            onReady.run();
+            return;
+        }
+
+        server.execute(() -> {
+            try {
+                int port = ensurePublishedOnServerThread(server);
+                EvgeniumSpeedRun.LOGGER.info("Runner integrated server published for spectator relay on port {}", port);
+            } catch (Throwable throwable) {
+                EvgeniumSpeedRun.LOGGER.warn("Could not pre-publish runner world for spectators", throwable);
+                minecraft.execute(() -> RaceSpectatorNotifications.error(
+                    "Не удалось открыть мир для наблюдателей: " + throwable.getMessage()
+                ));
+            } finally {
+                minecraft.execute(onReady);
+            }
+        });
     }
 
     public static void watch(String targetName) {
@@ -101,8 +130,11 @@ public final class SpectatorRelayClient {
             }
             ServerAddress address = ServerAddress.parseString(addressText);
             ServerData data = new ServerData("Evgenium Spectator", addressText, ServerData.Type.OTHER);
-            TransferState transferState = new TransferState(Map.of(), Map.of(), false);
-            ConnectScreen.startConnecting(returnScreen, minecraft, address, data, false, transferState);
+
+            // null TransferState is intentional. Passing a non-null transfer state marks the
+            // login as a server-transfer connection and vanilla rejects it with
+            // multiplayer.disconnect.transfers_disabled ("Сервер не принимает сторонних игроков").
+            ConnectScreen.startConnecting(returnScreen, minecraft, address, data, false, null);
         });
     }
 
@@ -149,25 +181,30 @@ public final class SpectatorRelayClient {
 
     private static int ensureIntegratedServerPublished() throws Exception {
         Minecraft minecraft = Minecraft.getInstance();
+        IntegratedServer server = minecraft.getSingleplayerServer();
+        if (server == null) {
+            throw new IllegalStateException("Локальный мир уже закрыт");
+        }
+
         CompletableFuture<Integer> future = new CompletableFuture<>();
-        minecraft.execute(() -> {
+        server.execute(() -> {
             try {
-                var server = minecraft.getSingleplayerServer();
-                if (server == null) {
-                    throw new IllegalStateException("Локальный мир уже закрыт");
-                }
-                if (!server.isPublished()) {
-                    int port = findFreePort();
-                    if (!server.publishServer(MinecraftServer.MultiplayerScope.LAN, GameType.SPECTATOR, false, port)) {
-                        throw new IllegalStateException("Minecraft не смог открыть локальный spectator-порт");
-                    }
-                }
-                future.complete(server.getPort());
+                future.complete(ensurePublishedOnServerThread(server));
             } catch (Throwable throwable) {
                 future.completeExceptionally(throwable);
             }
         });
         return future.get(10, TimeUnit.SECONDS);
+    }
+
+    private static int ensurePublishedOnServerThread(IntegratedServer server) throws IOException {
+        if (!server.isPublished()) {
+            int port = findFreePort();
+            if (!server.publishServer(MinecraftServer.MultiplayerScope.LAN, GameType.SPECTATOR, false, port)) {
+                throw new IllegalStateException("Minecraft не смог открыть мир для наблюдателей");
+            }
+        }
+        return server.getPort();
     }
 
     private static int findFreePort() throws IOException {
