@@ -1,6 +1,7 @@
 package org.evgenium.speedrun;
 
 import net.fabricmc.api.ModInitializer;
+import org.evgenium.speedrun.spectator.SpectatorServerHooks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -10,6 +11,7 @@ public final class EvgeniumSpeedRun implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        SpectatorServerHooks.install();
         LOGGER.info("Evgenium SpeedRun common foundation initialized");
     }
 }
