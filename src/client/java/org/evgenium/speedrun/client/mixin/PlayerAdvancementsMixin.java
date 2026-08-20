@@ -6,6 +6,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.server.PlayerAdvancements;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.players.PlayerList;
 import org.evgenium.speedrun.client.lobby.LobbyService;
 import org.evgenium.speedrun.client.match.RaceSession;
 import org.spongepowered.asm.mixin.Mixin;
@@ -13,6 +14,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(PlayerAdvancements.class)
@@ -36,6 +38,23 @@ public abstract class PlayerAdvancementsMixin {
         CallbackInfoReturnable<Boolean> cir
     ) {
         evgenium$wasDoneBeforeAward = getOrStartProgress(advancement).isDone();
+    }
+
+    @Redirect(
+        method = "award(Lnet/minecraft/advancements/AdvancementHolder;Ljava/lang/String;)Z",
+        at = @At(
+            value = "INVOKE",
+            target = "Lnet/minecraft/server/players/PlayerList;broadcastSystemMessage(Lnet/minecraft/network/chat/Component;Z)V"
+        )
+    )
+    private void evgenium$replaceVanillaRaceAnnouncement(PlayerList playerList, Component message, boolean overlay) {
+        if (RaceSession.isRunning()) {
+            // During an Evgenium race our lobby broadcast below is the single source of
+            // advancement chat. Suppressing vanilla avoids duplicate messages for the runner
+            // and for spectators currently connected to this integrated server.
+            return;
+        }
+        playerList.broadcastSystemMessage(message, overlay);
     }
 
     @Inject(
