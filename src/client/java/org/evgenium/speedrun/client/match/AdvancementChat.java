@@ -27,6 +27,6 @@ public final class AdvancementChat {
             .append(title.withStyle(ChatFormatting.GREEN))
             .append(Component.literal("]").withStyle(ChatFormatting.GREEN));
 
-        minecraft.gui.hud.getChat().addMessage(message);
+        minecraft.gui.hud.getChat().addClientSystemMessage(message);
     }
 }
