@@ -8,7 +8,7 @@ import java.util.List;
 
 final class LobbyProtocol {
     static final int MAGIC = 0x45565352; // EVSR
-    static final int VERSION = 6;
+    static final int VERSION = 7;
 
     static final byte CHANNEL_CONTROL = 1;
     static final byte CHANNEL_SPECTATOR_SOURCE = 2;
@@ -20,9 +20,11 @@ final class LobbyProtocol {
     static final byte GO = 13;
     static final byte FINISH_UPDATE = 14;
     static final byte OPEN_SPECTATOR_TUNNEL = 15;
+    static final byte ADVANCEMENT_BROADCAST = 16;
     static final byte LEAVE = 20;
     static final byte READY = 21;
     static final byte FINISH = 22;
+    static final byte ADVANCEMENT = 23;
 
     private LobbyProtocol() {
     }
@@ -86,6 +88,14 @@ final class LobbyProtocol {
             throw new IOException("Некорректное имя игрока");
         }
         return name;
+    }
+
+    private static String validateText(String raw, String field, int maxLength) throws IOException {
+        String text = raw == null ? "" : raw.trim();
+        if (text.length() > maxLength) {
+            throw new IOException("Слишком длинное поле " + field);
+        }
+        return text;
     }
 
     static void writeState(DataOutputStream out, LobbySnapshot snapshot) throws IOException {
@@ -183,6 +193,37 @@ final class LobbyProtocol {
         }
     }
 
+    static void writeAdvancement(DataOutputStream out, String titleKey, String fallbackTitle) throws IOException {
+        out.writeByte(ADVANCEMENT);
+        out.writeUTF(titleKey == null ? "" : titleKey);
+        out.writeUTF(fallbackTitle == null ? "" : fallbackTitle);
+        out.flush();
+    }
+
+    static AdvancementPayload readAdvancement(DataInputStream in) throws IOException {
+        String titleKey = validateText(in.readUTF(), "advancement title key", 256);
+        String fallbackTitle = validateText(in.readUTF(), "advancement title", 512);
+        if (titleKey.isEmpty() && fallbackTitle.isEmpty()) {
+            throw new IOException("Пустое достижение");
+        }
+        return new AdvancementPayload(titleKey, fallbackTitle);
+    }
+
+    static void writeAdvancementBroadcast(DataOutputStream out, LobbyAdvancement advancement) throws IOException {
+        out.writeByte(ADVANCEMENT_BROADCAST);
+        out.writeUTF(advancement.playerName());
+        out.writeUTF(advancement.titleKey());
+        out.writeUTF(advancement.fallbackTitle());
+        out.flush();
+    }
+
+    static LobbyAdvancement readAdvancementBroadcast(DataInputStream in) throws IOException {
+        String playerName = validatePlayerName(in.readUTF());
+        String titleKey = validateText(in.readUTF(), "advancement title key", 256);
+        String fallbackTitle = validateText(in.readUTF(), "advancement title", 512);
+        return new LobbyAdvancement(playerName, titleKey, fallbackTitle);
+    }
+
     static void writeOpenSpectatorTunnel(DataOutputStream out, long tunnelId) throws IOException {
         out.writeByte(OPEN_SPECTATOR_TUNNEL);
         out.writeLong(tunnelId);
@@ -204,5 +245,8 @@ final class LobbyProtocol {
     }
 
     record ConnectionHello(byte channel, String playerName, String targetName, long tunnelId) {
+    }
+
+    record AdvancementPayload(String titleKey, String fallbackTitle) {
     }
 }
