@@ -169,7 +169,13 @@ public final class SpectatorRelayClient {
                     relay.setTcpNoDelay(true);
                     DataOutputStream relayOut = new DataOutputStream(relay.getOutputStream());
                     LobbyProtocolAccess.writeSpectatorTargetHello(relayOut, tunnelId);
-                    relay(localMinecraft, relay);
+
+                    // The relay host has already authorized this spectator tunnel. Arm exactly
+                    // one loopback Minecraft login so ServerLoginPacketListenerImpl can skip the
+                    // redundant Mojang session check for this internal connection only.
+                    try (SpectatorRelayAuth.Permit ignored = SpectatorRelayAuth.armExpectedLocalLogin()) {
+                        relay(localMinecraft, relay);
+                    }
                 }
             } catch (Exception exception) {
                 EvgeniumSpeedRun.LOGGER.warn("Failed to open spectator target tunnel {}", tunnelId, exception);
