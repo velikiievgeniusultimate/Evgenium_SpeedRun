@@ -17,6 +17,7 @@ public final class CompetitiveRngSelfTest {
         List<String> failed = new ArrayList<>();
 
         check("same seed reproduces all streams", passed, failed, () -> testReproducibility(currentSeed));
+        check("golden vectors survive restart/refactor", passed, failed, CompetitiveRngSelfTest::testGoldenVectors);
         check("streams are independent", passed, failed, CompetitiveRngSelfTest::testStreamIndependence);
         check("float is always [0,1)", passed, failed, CompetitiveRngSelfTest::testFloatRange);
         check("integer ranges are respected", passed, failed, CompetitiveRngSelfTest::testIntRanges);
@@ -38,6 +39,27 @@ public final class CompetitiveRngSelfTest {
                 require(a == b, "mismatch " + stream + " index=" + i);
             }
         }
+    }
+
+    /**
+     * These exact outputs are part of MCSR-Like ruleset R1. A restart, JVM change or refactor
+     * must not change them. If we ever intentionally change them, that requires a new ruleset.
+     */
+    private static void testGoldenVectors() {
+        assertVector(0L, RngStream.FLINT, 0L, 54553388444833438L);
+        assertVector(-1L, RngStream.BLAZE_DROP, 0L, 515844464882043509L);
+        assertVector(Long.MIN_VALUE, RngStream.BARTER, 7L, 3591598609350414834L);
+        assertVector(Long.MAX_VALUE, RngStream.EYE_BREAK, 9999L, 285930917994781591L);
+        assertVector(123456789L, RngStream.ENDERMAN_DROP, 42L, 141079692125242005L);
+    }
+
+    private static void assertVector(long seed, RngStream stream, long index, long expected) {
+        long actual = DeterministicRngCore.valueFor(seed, stream, index);
+        require(
+            actual == expected,
+            "golden vector changed seed=" + seed + " stream=" + stream + " index=" + index
+                + " expected=" + expected + " actual=" + actual
+        );
     }
 
     private static void testStreamIndependence() {
