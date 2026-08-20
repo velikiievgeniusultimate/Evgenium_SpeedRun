@@ -9,7 +9,9 @@ import org.evgenium.speedrun.EvgeniumSpeedRun;
 import org.evgenium.speedrun.client.lobby.LobbyRaceResult;
 import org.evgenium.speedrun.client.lobby.LobbyRunConfig;
 import org.evgenium.speedrun.client.lobby.LobbyService;
+import org.evgenium.speedrun.client.lobby.RandomizationType;
 import org.evgenium.speedrun.client.lobby.SpeedrunGoal;
+import org.evgenium.speedrun.client.mcsr.CompetitiveRng;
 import org.evgenium.speedrun.client.runtime.ClientPhase;
 import org.evgenium.speedrun.client.runtime.ClientRuntime;
 import org.evgenium.speedrun.client.spectator.SpectatorRelayClient;
@@ -20,6 +22,10 @@ import java.util.UUID;
 
 public final class RaceSession {
     private static volatile LobbyRunConfig config;
+    private static volatile long worldSeed;
+    private static volatile long rngSeed;
+    private static volatile boolean cheatsEnabled;
+    private static volatile RandomizationType randomizationType = RandomizationType.MCSR_LIKE;
     private static volatile boolean waitingForGo;
     private static volatile boolean readyReported;
     private static volatile boolean running;
@@ -35,6 +41,12 @@ public final class RaceSession {
 
     public static void arm(LobbyRunConfig newConfig) {
         config = newConfig;
+        worldSeed = newConfig.worldSeed();
+        rngSeed = newConfig.rngSeed();
+        cheatsEnabled = newConfig.cheatsEnabled();
+        randomizationType = newConfig.randomizationType();
+        CompetitiveRng.arm(rngSeed);
+
         waitingForGo = false;
         readyReported = false;
         running = false;
@@ -44,6 +56,14 @@ public final class RaceSession {
         startNanoTime = -1L;
         finalElapsedNanos = -1L;
         localPlace = -1;
+
+        EvgeniumSpeedRun.LOGGER.info(
+            "RaceSession armed worldSeed={} rngSeed={} randomization={} cheats={}",
+            worldSeed,
+            rngSeed,
+            randomizationType.id(),
+            cheatsEnabled
+        );
     }
 
     public static void onWorldJoined(Minecraft minecraft) {
@@ -81,7 +101,6 @@ public final class RaceSession {
         EvgeniumSpeedRun.LOGGER.info("Normalized speedrun spawn to {}, {}, {}", x, y, z);
 
         // READY is delayed until the integrated server has been published for spectator relay.
-        // This guarantees that every runner world is already multiplayer-capable before GO.
         minecraft.execute(() -> SpectatorRelayClient.prepareLocalRunnerWorld(RaceSession::reportReady));
     }
 
@@ -177,14 +196,32 @@ public final class RaceSession {
                     return;
                 }
 
-                // The real inventory is wiped and remains empty. Vanilla spectator mode hides
-                // it completely, so Evgenium renders one virtual selector slot client-side.
                 player.getInventory().clearContent();
                 player.setGameMode(GameType.SPECTATOR);
             });
         }
 
         minecraft.execute(() -> minecraft.gui.setScreen(null));
+    }
+
+    public static boolean hasRunConfig() {
+        return config != null;
+    }
+
+    public static long worldSeed() {
+        return worldSeed;
+    }
+
+    public static long rngSeed() {
+        return rngSeed;
+    }
+
+    public static boolean cheatsEnabled() {
+        return cheatsEnabled;
+    }
+
+    public static RandomizationType randomizationType() {
+        return randomizationType;
     }
 
     public static boolean isWaitingForGo() {
