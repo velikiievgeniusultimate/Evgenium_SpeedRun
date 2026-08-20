@@ -15,13 +15,7 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Live competitive RNG controller for the active race.
- *
- * The deterministic math itself lives in the common DeterministicRngCore. This class adds the
- * MCSR-mode gate, per-stream live counters, structured logging and the last-50-event history.
- * In Vanilla mode every operation returns "not handled" and no counter advances.
- */
+/** Live competitive RNG controller for the active race. */
 public final class CompetitiveRng {
     public static final int HISTORY_LIMIT = 50;
 
@@ -39,42 +33,40 @@ public final class CompetitiveRng {
         sequence = new RngSequence(seed);
         armed = true;
         clearHistory();
-        EvgeniumSpeedRun.LOGGER.info(
-            "[EVSR-RNG] init rngSeed={} ruleset={}",
-            seed,
-            McsrRules.MCSR_RULESET_VERSION
-        );
+        EvgeniumSpeedRun.LOGGER.info("[EVSR-RNG] init rngSeed={} ruleset={}", seed, McsrRules.MCSR_RULESET_VERSION);
     }
 
     public static OptionalLong nextLong(RngStream stream) {
         RngSequence.Draw draw = draw(stream);
-        if (draw == null) {
-            return OptionalLong.empty();
-        }
+        if (draw == null) return OptionalLong.empty();
         record(draw, "LONG", Long.toString(draw.rawValue()));
         return OptionalLong.of(draw.rawValue());
     }
 
-    /** Returns a deterministic float in [0, 1). */
+    /**
+     * Starts a composite event that owns exactly one stream index. Callers may derive any number
+     * of deterministic subdraws from rawValue without moving the stream again.
+     */
+    public static Optional<EventSeed> beginCompositeEvent(RngStream stream, String operation) {
+        RngSequence.Draw draw = draw(stream);
+        if (draw == null) return Optional.empty();
+        String op = operation == null || operation.isBlank() ? "COMPOSITE" : operation;
+        record(draw, op, "begin");
+        return Optional.of(new EventSeed(draw.stream(), draw.index(), draw.rawValue()));
+    }
+
     public static Optional<Float> nextFloat(RngStream stream) {
         RngSequence.Draw draw = draw(stream);
-        if (draw == null) {
-            return Optional.empty();
-        }
+        if (draw == null) return Optional.empty();
         float result = DeterministicRngCore.unitFloat(draw.rawValue());
         record(draw, "FLOAT", Float.toString(result));
         return Optional.of(result);
     }
 
-    /** Returns a deterministic integer in [originInclusive, boundExclusive). */
     public static OptionalInt nextInt(RngStream stream, int originInclusive, int boundExclusive) {
-        if (originInclusive >= boundExclusive) {
-            throw new IllegalArgumentException("origin must be < bound");
-        }
+        if (originInclusive >= boundExclusive) throw new IllegalArgumentException("origin must be < bound");
         RngSequence.Draw draw = draw(stream);
-        if (draw == null) {
-            return OptionalInt.empty();
-        }
+        if (draw == null) return OptionalInt.empty();
         int result = DeterministicRngCore.boundedInt(draw.rawValue(), originInclusive, boundExclusive);
         record(draw, "INT[" + originInclusive + "," + boundExclusive + ")", Integer.toString(result));
         return OptionalInt.of(result);
@@ -82,9 +74,7 @@ public final class CompetitiveRng {
 
     public static Optional<Boolean> nextBoolean(RngStream stream) {
         RngSequence.Draw draw = draw(stream);
-        if (draw == null) {
-            return Optional.empty();
-        }
+        if (draw == null) return Optional.empty();
         boolean result = DeterministicRngCore.booleanValue(draw.rawValue());
         record(draw, "BOOLEAN", Boolean.toString(result));
         return Optional.of(result);
@@ -95,52 +85,33 @@ public final class CompetitiveRng {
             throw new IllegalArgumentException("probability must be in [0, 1]");
         }
         RngSequence.Draw draw = draw(stream);
-        if (draw == null) {
-            return Optional.empty();
-        }
+        if (draw == null) return Optional.empty();
         boolean result = DeterministicRngCore.chance(draw.rawValue(), probability);
         record(draw, "CHANCE(" + probability + ")", Boolean.toString(result));
         return Optional.of(result);
     }
 
     public static <T> Optional<T> weightedChoice(RngStream stream, List<Weighted<T>> choices) {
-        if (choices == null || choices.isEmpty()) {
-            throw new IllegalArgumentException("choices must not be empty");
-        }
+        if (choices == null || choices.isEmpty()) throw new IllegalArgumentException("choices must not be empty");
         double[] weights = new double[choices.size()];
         for (int i = 0; i < choices.size(); i++) {
             Weighted<T> choice = choices.get(i);
-            if (choice == null) {
-                throw new IllegalArgumentException("choice == null");
-            }
+            if (choice == null) throw new IllegalArgumentException("choice == null");
             weights[i] = choice.weight();
         }
-
-        // Validate before an event is consumed.
         DeterministicRngCore.weightedIndex(0L, weights);
-
         RngSequence.Draw draw = draw(stream);
-        if (draw == null) {
-            return Optional.empty();
-        }
+        if (draw == null) return Optional.empty();
         int selected = DeterministicRngCore.weightedIndex(draw.rawValue(), weights);
         T value = choices.get(selected).value();
         record(draw, "WEIGHTED(" + choices.size() + ")", "index=" + selected + " value=" + String.valueOf(value));
         return Optional.ofNullable(value);
     }
 
-    /**
-     * Deterministically shuffles the supplied list using exactly one event index from the stream.
-     * Returns false in Vanilla mode so the caller can fall back to vanilla RNG.
-     */
     public static <T> boolean shuffleInPlace(RngStream stream, List<T> values) {
-        if (values == null) {
-            throw new IllegalArgumentException("values == null");
-        }
+        if (values == null) throw new IllegalArgumentException("values == null");
         RngSequence.Draw draw = draw(stream);
-        if (draw == null) {
-            return false;
-        }
+        if (draw == null) return false;
         DeterministicRngCore.shuffleInPlace(draw.rawValue(), values);
         record(draw, "SHUFFLE", "size=" + values.size());
         return true;
@@ -153,10 +124,7 @@ public final class CompetitiveRng {
 
     public static Map<RngStream, Long> countersSnapshot() {
         RngSequence current = sequence;
-        if (current == null) {
-            return Map.of();
-        }
-        return current.countersSnapshot();
+        return current == null ? Map.of() : current.countersSnapshot();
     }
 
     public static long totalEvents() {
@@ -166,13 +134,9 @@ public final class CompetitiveRng {
 
     public static void resetCounters() {
         RngSequence current = sequence;
-        if (current != null) {
-            current.resetCounters();
-        }
+        if (current != null) current.resetCounters();
         clearHistory();
-        if (armed) {
-            EvgeniumSpeedRun.LOGGER.info("[EVSR-RNG] counters and history reset");
-        }
+        if (armed) EvgeniumSpeedRun.LOGGER.info("[EVSR-RNG] counters and history reset");
     }
 
     public static long rngSeed() {
@@ -187,35 +151,22 @@ public final class CompetitiveRng {
     }
 
     private static RngSequence.Draw draw(RngStream stream) {
-        if (!armed || !McsrRules.active()) {
-            return null;
-        }
-        if (stream == null) {
-            throw new IllegalArgumentException("stream == null");
-        }
+        if (!armed || !McsrRules.active()) return null;
+        if (stream == null) throw new IllegalArgumentException("stream == null");
         RngSequence current = sequence;
-        if (current == null) {
-            return null;
-        }
-        return current.next(stream);
+        return current == null ? null : current.next(stream);
     }
 
     private static void record(RngSequence.Draw draw, String operation, String result) {
         long ordinal = EVENT_ORDINAL.getAndIncrement();
         RngEvent event = new RngEvent(ordinal, draw.stream(), draw.index(), operation, draw.rawValue(), result);
         synchronized (HISTORY_LOCK) {
-            while (HISTORY.size() >= HISTORY_LIMIT) {
-                HISTORY.removeFirst();
-            }
+            while (HISTORY.size() >= HISTORY_LIMIT) HISTORY.removeFirst();
             HISTORY.addLast(event);
         }
         EvgeniumSpeedRun.LOGGER.info(
             "[EVSR-RNG] stream={} index={} op={} raw={} result={}",
-            draw.stream().name(),
-            draw.index(),
-            operation,
-            draw.rawValue(),
-            result
+            draw.stream().name(), draw.index(), operation, draw.rawValue(), result
         );
     }
 
@@ -225,6 +176,8 @@ public final class CompetitiveRng {
         }
         EVENT_ORDINAL.set(0L);
     }
+
+    public record EventSeed(RngStream stream, long index, long rawValue) {}
 
     public record Weighted<T>(T value, double weight) {
         public Weighted {
