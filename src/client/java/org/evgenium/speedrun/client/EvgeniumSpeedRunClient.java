@@ -6,6 +6,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.gui.screens.WinScreen;
 import org.evgenium.speedrun.EvgeniumSpeedRun;
+import org.evgenium.speedrun.client.match.RaceNetworkController;
 import org.evgenium.speedrun.client.match.RaceNotificationHud;
 import org.evgenium.speedrun.client.match.RacePauseController;
 import org.evgenium.speedrun.client.match.RaceSession;
@@ -35,6 +36,7 @@ public final class EvgeniumSpeedRunClient implements ClientModInitializer {
         ClientTickEvents.START_CLIENT_TICK.register(SpectatorController::tick);
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             RaceSession.tick(client);
+            RaceNetworkController.tick(client);
             RacePauseController.tick(client);
         });
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {

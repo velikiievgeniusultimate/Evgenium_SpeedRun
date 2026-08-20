@@ -8,7 +8,7 @@ import java.util.List;
 
 final class LobbyProtocol {
     static final int MAGIC = 0x45565352; // EVSR
-    static final int VERSION = 9;
+    static final int VERSION = 10;
 
     static final byte CHANNEL_CONTROL = 1;
     static final byte CHANNEL_SPECTATOR_SOURCE = 2;
@@ -21,17 +21,23 @@ final class LobbyProtocol {
     static final byte FINISH_UPDATE = 14;
     static final byte OPEN_SPECTATOR_TUNNEL = 15;
     static final byte ADVANCEMENT_BROADCAST = 16;
+    static final byte SESSION = 17;
+    static final byte PONG = 18;
+    static final byte RESUME_RUN = 19;
+
     static final byte LEAVE = 20;
     static final byte READY = 21;
     static final byte FINISH = 22;
     static final byte ADVANCEMENT = 23;
+    static final byte PING = 24;
 
     private LobbyProtocol() {
     }
 
-    static void writeHello(DataOutputStream out, String playerName) throws IOException {
+    static void writeHello(DataOutputStream out, String playerName, String reconnectToken) throws IOException {
         writeHeader(out, CHANNEL_CONTROL);
         out.writeUTF(playerName);
+        out.writeUTF(reconnectToken == null ? "" : reconnectToken);
         out.flush();
     }
 
@@ -65,19 +71,20 @@ final class LobbyProtocol {
         byte channel = in.readByte();
         if (channel == CHANNEL_CONTROL) {
             String name = validatePlayerName(in.readUTF());
-            return new ConnectionHello(channel, name, null, -1L);
+            String reconnectToken = validateText(in.readUTF(), "reconnect token", 160);
+            return new ConnectionHello(channel, name, null, -1L, reconnectToken);
         }
         if (channel == CHANNEL_SPECTATOR_SOURCE) {
             String spectatorName = validatePlayerName(in.readUTF());
             String targetName = validatePlayerName(in.readUTF());
-            return new ConnectionHello(channel, spectatorName, targetName, -1L);
+            return new ConnectionHello(channel, spectatorName, targetName, -1L, "");
         }
         if (channel == CHANNEL_SPECTATOR_TARGET) {
             long tunnelId = in.readLong();
             if (tunnelId <= 0L) {
                 throw new IOException("Некорректный tunnel id");
             }
-            return new ConnectionHello(channel, null, null, tunnelId);
+            return new ConnectionHello(channel, null, null, tunnelId, "");
         }
         throw new IOException("Неизвестный тип соединения: " + channel);
     }
@@ -98,6 +105,21 @@ final class LobbyProtocol {
         return text;
     }
 
+    static void writeSession(DataOutputStream out, String reconnectToken, boolean reconnected) throws IOException {
+        out.writeByte(SESSION);
+        out.writeUTF(reconnectToken);
+        out.writeBoolean(reconnected);
+        out.flush();
+    }
+
+    static SessionPayload readSession(DataInputStream in) throws IOException {
+        String token = validateText(in.readUTF(), "session token", 160);
+        if (token.isEmpty()) {
+            throw new IOException("Пустой session token");
+        }
+        return new SessionPayload(token, in.readBoolean());
+    }
+
     static void writeState(DataOutputStream out, LobbySnapshot snapshot) throws IOException {
         out.writeByte(STATE);
         out.writeBoolean(snapshot.cheatsEnabled());
@@ -107,6 +129,7 @@ final class LobbyProtocol {
         for (LobbyPlayer player : snapshot.players()) {
             out.writeUTF(player.name());
             out.writeBoolean(player.host());
+            out.writeBoolean(player.connected());
         }
         out.flush();
     }
@@ -127,22 +150,30 @@ final class LobbyProtocol {
         }
         List<LobbyPlayer> players = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
-            players.add(new LobbyPlayer(in.readUTF(), in.readBoolean()));
+            players.add(new LobbyPlayer(in.readUTF(), in.readBoolean(), in.readBoolean()));
         }
         return new LobbySnapshot(players, cheatsEnabled, goal, randomizationType);
     }
 
     static void writeStartRun(DataOutputStream out, LobbyRunConfig config) throws IOException {
         out.writeByte(START_RUN);
+        writeRunConfig(out, config);
+        out.flush();
+    }
+
+    static LobbyRunConfig readStartRun(DataInputStream in) throws IOException {
+        return readRunConfig(in);
+    }
+
+    private static void writeRunConfig(DataOutputStream out, LobbyRunConfig config) throws IOException {
         out.writeLong(config.worldSeed());
         out.writeLong(config.rngSeed());
         out.writeBoolean(config.cheatsEnabled());
         out.writeUTF(config.goal().id());
         out.writeUTF(config.randomizationType().id());
-        out.flush();
     }
 
-    static LobbyRunConfig readStartRun(DataInputStream in) throws IOException {
+    private static LobbyRunConfig readRunConfig(DataInputStream in) throws IOException {
         long worldSeed = in.readLong();
         long rngSeed = in.readLong();
         boolean cheatsEnabled = in.readBoolean();
@@ -153,6 +184,33 @@ final class LobbyProtocol {
         } catch (IllegalArgumentException exception) {
             throw new IOException(exception.getMessage(), exception);
         }
+    }
+
+    static void writeResumeRun(DataOutputStream out, LobbyResumeState state) throws IOException {
+        out.writeByte(RESUME_RUN);
+        writeRunConfig(out, state.config());
+        out.writeBoolean(state.goIssued());
+        out.writeLong(state.goAtEpochMillis());
+        out.writeInt(state.results().size());
+        for (LobbyRaceResult result : state.results()) {
+            writeRaceResultBody(out, result);
+        }
+        out.flush();
+    }
+
+    static LobbyResumeState readResumeRun(DataInputStream in) throws IOException {
+        LobbyRunConfig config = readRunConfig(in);
+        boolean goIssued = in.readBoolean();
+        long goAtEpochMillis = in.readLong();
+        int count = in.readInt();
+        if (count < 0 || count > 128) {
+            throw new IOException("Некорректное число результатов при reconnect");
+        }
+        List<LobbyRaceResult> results = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            results.add(readRaceResultBody(in));
+        }
+        return new LobbyResumeState(config, goIssued, goAtEpochMillis, results);
     }
 
     static void writeReady(DataOutputStream out) throws IOException {
@@ -186,14 +244,22 @@ final class LobbyProtocol {
 
     static void writeFinishUpdate(DataOutputStream out, LobbyRaceResult result) throws IOException {
         out.writeByte(FINISH_UPDATE);
-        out.writeUTF(result.playerName());
-        out.writeInt(result.place());
-        out.writeLong(result.elapsedMillis());
-        out.writeInt(result.totalPlayers());
+        writeRaceResultBody(out, result);
         out.flush();
     }
 
     static LobbyRaceResult readFinishUpdate(DataInputStream in) throws IOException {
+        return readRaceResultBody(in);
+    }
+
+    private static void writeRaceResultBody(DataOutputStream out, LobbyRaceResult result) throws IOException {
+        out.writeUTF(result.playerName());
+        out.writeInt(result.place());
+        out.writeLong(result.elapsedMillis());
+        out.writeInt(result.totalPlayers());
+    }
+
+    private static LobbyRaceResult readRaceResultBody(DataInputStream in) throws IOException {
         try {
             return new LobbyRaceResult(in.readUTF(), in.readInt(), in.readLong(), in.readInt());
         } catch (IllegalArgumentException exception) {
@@ -246,15 +312,62 @@ final class LobbyProtocol {
         return tunnelId;
     }
 
+    static void writePing(DataOutputStream out, long pingId, long clientSendEpochMillis, long clientSendNano) throws IOException {
+        out.writeByte(PING);
+        out.writeLong(pingId);
+        out.writeLong(clientSendEpochMillis);
+        out.writeLong(clientSendNano);
+        out.flush();
+    }
+
+    static PingPayload readPing(DataInputStream in) throws IOException {
+        return new PingPayload(in.readLong(), in.readLong(), in.readLong());
+    }
+
+    static void writePong(DataOutputStream out, PingPayload ping, long hostReceiveEpochMillis, long hostSendEpochMillis) throws IOException {
+        out.writeByte(PONG);
+        out.writeLong(ping.pingId());
+        out.writeLong(ping.clientSendEpochMillis());
+        out.writeLong(ping.clientSendNano());
+        out.writeLong(hostReceiveEpochMillis);
+        out.writeLong(hostSendEpochMillis);
+        out.flush();
+    }
+
+    static PongPayload readPong(DataInputStream in) throws IOException {
+        return new PongPayload(
+            in.readLong(),
+            in.readLong(),
+            in.readLong(),
+            in.readLong(),
+            in.readLong()
+        );
+    }
+
     static void writeError(DataOutputStream out, String message) throws IOException {
         out.writeByte(ERROR);
         out.writeUTF(message);
         out.flush();
     }
 
-    record ConnectionHello(byte channel, String playerName, String targetName, long tunnelId) {
+    record ConnectionHello(byte channel, String playerName, String targetName, long tunnelId, String reconnectToken) {
+    }
+
+    record SessionPayload(String reconnectToken, boolean reconnected) {
     }
 
     record AdvancementPayload(String titleKey, String fallbackTitle) {
+    }
+
+    record PingPayload(long pingId, long clientSendEpochMillis, long clientSendNano) {
+    }
+
+    record PongPayload(
+        long pingId,
+        long clientSendEpochMillis,
+        long clientSendNano,
+        long hostReceiveEpochMillis,
+        long hostSendEpochMillis
+    ) {
     }
 }

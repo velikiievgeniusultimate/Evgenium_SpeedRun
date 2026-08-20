@@ -6,47 +6,55 @@ import net.minecraft.client.server.IntegratedServer;
 import org.evgenium.speedrun.EvgeniumSpeedRun;
 
 /**
- * Replaces vanilla singleplayer pause semantics for active races.
+ * Single owner of integrated-server freeze state during a race.
  *
- * Runner worlds are intentionally published for spectator connections, which means vanilla
- * IntegratedServer pause no longer applies when ESC is opened. Instead we freeze gameplay
- * ticks with ServerTickRateManager. Vanilla tick freeze keeps players responsive, so remote
- * spectators can continue flying while mobs, redstone, projectiles, portals, random ticks,
- * game time, etc. remain frozen.
- *
- * The speedrun timer is client monotonic time and deliberately keeps running while frozen.
+ * Freeze reasons are intentionally combined here so ESC cannot accidentally unfreeze a world
+ * that is frozen for lost networking/time sync, and reconnect cannot unfreeze a world that is
+ * still on the pre-GO waiting screen.
  */
 public final class RacePauseController {
     private static volatile IntegratedServer frozenServer;
+    private static volatile String frozenReason = "";
 
     private RacePauseController() {
     }
 
     public static void tick(Minecraft minecraft) {
         IntegratedServer server = minecraft.getSingleplayerServer();
-        boolean shouldFreeze = RaceSession.isRunning()
-            && !RaceSession.isLocalFinished()
-            && server != null
+        boolean preStart = RaceSession.isWaitingForGo();
+        boolean network = RaceNetworkController.shouldBlockRunner();
+        boolean esc = RaceSession.isRunning()
             && minecraft.gui.screen() instanceof PauseScreen;
 
+        boolean shouldFreeze = RaceSession.hasRunConfig()
+            && !RaceSession.isLocalFinished()
+            && server != null
+            && (preStart || network || esc);
+
+        String reason = preStart ? "PRE_START" : network ? "NETWORK_SYNC" : esc ? "ESC" : "";
         IntegratedServer previous = frozenServer;
+
         if (shouldFreeze) {
             if (previous == server) {
+                frozenReason = reason;
                 return;
             }
             if (previous != null) {
                 setFrozen(previous, false);
             }
             frozenServer = server;
+            frozenReason = reason;
             setFrozen(server, true);
-            EvgeniumSpeedRun.LOGGER.info("Runner opened ESC menu; gameplay simulation frozen while network remains active");
+            EvgeniumSpeedRun.LOGGER.info("Race simulation frozen: {}", reason);
             return;
         }
 
         if (previous != null) {
             frozenServer = null;
+            String oldReason = frozenReason;
+            frozenReason = "";
             setFrozen(previous, false);
-            EvgeniumSpeedRun.LOGGER.info("Runner closed ESC menu; gameplay simulation resumed");
+            EvgeniumSpeedRun.LOGGER.info("Race simulation resumed; previous reason={}", oldReason);
         }
     }
 

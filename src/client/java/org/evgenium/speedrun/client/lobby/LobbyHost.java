@@ -12,13 +12,14 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -27,6 +28,8 @@ import java.util.function.LongConsumer;
 final class LobbyHost implements AutoCloseable {
     private static final long COUNTDOWN_MILLIS = 4000L;
     private static final long TUNNEL_TIMEOUT_SECONDS = 12L;
+    private static final int CONTROL_READ_TIMEOUT_MILLIS = 6_500;
+    private static final long RECENT_HEARTBEAT_NANOS = 3_500_000_000L;
 
     private final int port;
     private final LobbyPlayer hostPlayer;
@@ -37,15 +40,18 @@ final class LobbyHost implements AutoCloseable {
     private final Consumer<LobbyRaceResult> resultConsumer;
     private final Consumer<LobbyAdvancement> advancementConsumer;
     private final LongConsumer localTunnelConsumer;
-    private final CopyOnWriteArrayList<Peer> peers = new CopyOnWriteArrayList<>();
+    private final Map<String, Participant> participants = new LinkedHashMap<>();
     private final Map<String, LobbyRaceResult> finishes = new LinkedHashMap<>();
     private final ConcurrentHashMap<Long, PendingTunnel> tunnels = new ConcurrentHashMap<>();
     private final AtomicLong nextTunnelId = new AtomicLong(1L);
+
     private volatile boolean running;
     private volatile boolean preparingRun;
     private volatile boolean hostReady;
     private volatile boolean goIssued;
+    private volatile long goAtEpochMillis = -1L;
     private volatile SpeedrunGoal goal = SpeedrunGoal.COMPLETE_MINECRAFT;
+    private volatile LobbyRunConfig currentRunConfig;
     private ServerSocket serverSocket;
 
     LobbyHost(int port, String hostName, boolean cheatsEnabled, Consumer<LobbySnapshot> snapshotConsumer,
@@ -53,7 +59,7 @@ final class LobbyHost implements AutoCloseable {
               Consumer<LobbyRaceResult> resultConsumer, Consumer<LobbyAdvancement> advancementConsumer,
               LongConsumer localTunnelConsumer) {
         this.port = port;
-        this.hostPlayer = new LobbyPlayer(hostName, true);
+        this.hostPlayer = new LobbyPlayer(hostName, true, true);
         this.cheatsEnabled = cheatsEnabled;
         this.snapshotConsumer = snapshotConsumer;
         this.runConsumer = runConsumer;
@@ -105,7 +111,7 @@ final class LobbyHost implements AutoCloseable {
             DataInputStream in = new DataInputStream(socket.getInputStream());
             LobbyProtocol.ConnectionHello hello = LobbyProtocol.readConnectionHello(in);
             if (hello.channel() == LobbyProtocol.CHANNEL_CONTROL) {
-                handleControl(socket, in, hello.playerName());
+                handleControl(socket, in, hello.playerName(), hello.reconnectToken());
                 return;
             }
             if (hello.channel() == LobbyProtocol.CHANNEL_SPECTATOR_SOURCE) {
@@ -125,16 +131,54 @@ final class LobbyHost implements AutoCloseable {
         }
     }
 
-    private void handleControl(Socket socket, DataInputStream in, String playerName) {
+    private void handleControl(Socket socket, DataInputStream in, String playerName, String reconnectToken) {
+        Participant participant = null;
         Peer peer = null;
+        boolean reconnected = false;
+
         try (socket; DataOutputStream out = new DataOutputStream(socket.getOutputStream())) {
-            if (preparingRun || goIssued) {
-                LobbyProtocol.writeError(out, "Забег уже запущен");
-                return;
+            socket.setSoTimeout(CONTROL_READ_TIMEOUT_MILLIS);
+
+            synchronized (this) {
+                participant = participants.get(playerName);
+                if (participant == null) {
+                    if (currentRunConfig != null || preparingRun || goIssued) {
+                        LobbyProtocol.writeError(out, "Забег уже запущен; новое подключение невозможно");
+                        return;
+                    }
+                    participant = new Participant(playerName, UUID.randomUUID().toString());
+                    participants.put(playerName, participant);
+                } else {
+                    if (reconnectToken == null || reconnectToken.isEmpty() || !participant.reconnectToken.equals(reconnectToken)) {
+                        LobbyProtocol.writeError(out, "Имя уже занято другим участником");
+                        return;
+                    }
+                    reconnected = true;
+                    if (participant.peer != null) {
+                        closeQuietly(participant.peer.socket);
+                    }
+                }
+
+                peer = new Peer(participant, socket, out);
+                participant.peer = peer;
+                participant.connected = true;
+                participant.lastHeartbeatNano = System.nanoTime();
+                peer.sendSession(reconnected);
+                peer.send(snapshot());
+                if (currentRunConfig != null) {
+                    peer.sendResume(new LobbyResumeState(
+                        currentRunConfig,
+                        goIssued,
+                        goAtEpochMillis,
+                        new ArrayList<>(finishes.values())
+                    ));
+                }
             }
 
-            peer = new Peer(playerName, socket, out);
-            peers.add(peer);
+            EvgeniumSpeedRun.LOGGER.info(
+                reconnected ? "Lobby participant reconnected: {}" : "Lobby participant connected: {}",
+                playerName
+            );
             broadcastSnapshot();
 
             while (running && !socket.isClosed()) {
@@ -142,30 +186,52 @@ final class LobbyHost implements AutoCloseable {
                 if (message == LobbyProtocol.LEAVE) {
                     break;
                 }
+                if (message == LobbyProtocol.PING) {
+                    LobbyProtocol.PingPayload ping = LobbyProtocol.readPing(in);
+                    long hostReceive = System.currentTimeMillis();
+                    participant.lastHeartbeatNano = System.nanoTime();
+                    peer.sendPong(ping, hostReceive, System.currentTimeMillis());
+                    continue;
+                }
                 if (message == LobbyProtocol.READY) {
-                    peer.ready = true;
+                    participant.ready = true;
                     maybeStartCountdown();
                     continue;
                 }
                 if (message == LobbyProtocol.FINISH) {
-                    handleFinish(peer.playerName, LobbyProtocol.readFinish(in));
+                    handleFinish(participant.playerName, LobbyProtocol.readFinish(in));
                     continue;
                 }
                 if (message == LobbyProtocol.ADVANCEMENT) {
-                    handleAdvancement(peer.playerName, LobbyProtocol.readAdvancement(in));
+                    handleAdvancement(participant.playerName, LobbyProtocol.readAdvancement(in));
                     continue;
                 }
                 throw new IOException("Неизвестное сообщение клиента: " + message);
             }
+        } catch (SocketTimeoutException exception) {
+            if (running) {
+                EvgeniumSpeedRun.LOGGER.info("Lobby heartbeat timeout: {}", playerName);
+            }
         } catch (EOFException ignored) {
-            // Normal disconnect.
+            // Network changes and normal closes arrive here.
         } catch (IOException exception) {
             if (running) {
-                EvgeniumSpeedRun.LOGGER.info("Lobby peer disconnected: {}", exception.getMessage());
+                EvgeniumSpeedRun.LOGGER.info("Lobby peer disconnected: {}: {}", playerName, exception.getMessage());
             }
         } finally {
-            if (peer != null) {
-                peers.remove(peer);
+            if (participant != null && peer != null) {
+                synchronized (this) {
+                    if (participant.peer == peer) {
+                        participant.peer = null;
+                        participant.connected = false;
+                        if (preparingRun && !goIssued) {
+                            participant.ready = false;
+                        }
+                        if (currentRunConfig == null && !preparingRun && !goIssued) {
+                            participants.remove(participant.playerName);
+                        }
+                    }
+                }
                 broadcastSnapshot();
                 maybeStartCountdown();
             }
@@ -199,7 +265,7 @@ final class LobbyHost implements AutoCloseable {
                 Peer target = findPeer(targetName);
                 if (target == null) {
                     tunnels.remove(tunnelId);
-                    sendTunnelError(source, "Игрок отключился");
+                    sendTunnelError(source, "У игрока сейчас нет связи с хостом");
                     return;
                 }
                 target.sendOpenTunnel(tunnelId);
@@ -229,20 +295,13 @@ final class LobbyHost implements AutoCloseable {
         }
     }
 
-    private boolean isParticipant(String name) {
-        if (hostPlayer.name().equals(name)) {
-            return true;
-        }
-        return findPeer(name) != null;
+    private synchronized boolean isParticipant(String name) {
+        return hostPlayer.name().equals(name) || participants.containsKey(name);
     }
 
-    private Peer findPeer(String name) {
-        for (Peer peer : peers) {
-            if (peer.playerName.equals(name)) {
-                return peer;
-            }
-        }
-        return null;
+    private synchronized Peer findPeer(String name) {
+        Participant participant = participants.get(name);
+        return participant == null ? null : participant.peer;
     }
 
     synchronized boolean setGoal(SpeedrunGoal newGoal) {
@@ -267,12 +326,18 @@ final class LobbyHost implements AutoCloseable {
         preparingRun = true;
         hostReady = false;
         goIssued = false;
+        goAtEpochMillis = -1L;
+        currentRunConfig = config;
         finishes.clear();
-        for (Peer peer : peers) {
-            peer.ready = false;
+        for (Participant participant : participants.values()) {
+            participant.ready = false;
         }
 
-        for (Peer peer : peers) {
+        for (Participant participant : participants.values()) {
+            Peer peer = participant.peer;
+            if (peer == null) {
+                continue;
+            }
             try {
                 peer.sendRun(config);
             } catch (IOException exception) {
@@ -302,28 +367,36 @@ final class LobbyHost implements AutoCloseable {
     }
 
     private synchronized void maybeStartCountdown() {
-        if (!preparingRun || !hostReady) {
+        if (!preparingRun || !hostReady || goIssued) {
             return;
         }
-        for (Peer peer : peers) {
-            if (!peer.ready) {
+        long nowNano = System.nanoTime();
+        for (Participant participant : participants.values()) {
+            if (!participant.connected || participant.peer == null || !participant.ready) {
+                return;
+            }
+            if (nowNano - participant.lastHeartbeatNano > RECENT_HEARTBEAT_NANOS) {
                 return;
             }
         }
 
         preparingRun = false;
         goIssued = true;
-        long startAtEpochMillis = System.currentTimeMillis() + COUNTDOWN_MILLIS;
-        EvgeniumSpeedRun.LOGGER.info("All runners READY; synchronized GO at {}", startAtEpochMillis);
+        goAtEpochMillis = System.currentTimeMillis() + COUNTDOWN_MILLIS;
+        EvgeniumSpeedRun.LOGGER.info("All runners READY; synchronized GO at {}", goAtEpochMillis);
 
-        for (Peer peer : peers) {
+        for (Participant participant : participants.values()) {
+            Peer peer = participant.peer;
+            if (peer == null) {
+                continue;
+            }
             try {
-                peer.sendGo(startAtEpochMillis);
+                peer.sendGo(goAtEpochMillis);
             } catch (IOException exception) {
                 closeQuietly(peer.socket);
             }
         }
-        goConsumer.accept(startAtEpochMillis);
+        goConsumer.accept(goAtEpochMillis);
     }
 
     private synchronized void handleFinish(String playerName, long elapsedMillis) {
@@ -332,12 +405,16 @@ final class LobbyHost implements AutoCloseable {
         }
 
         int place = finishes.size() + 1;
-        int totalPlayers = peers.size() + 1;
+        int totalPlayers = participants.size() + 1;
         LobbyRaceResult result = new LobbyRaceResult(playerName, place, elapsedMillis, totalPlayers);
         finishes.put(playerName, result);
         EvgeniumSpeedRun.LOGGER.info("Runner finished: {} place={} time={}ms", playerName, place, elapsedMillis);
 
-        for (Peer peer : peers) {
+        for (Participant participant : participants.values()) {
+            Peer peer = participant.peer;
+            if (peer == null) {
+                continue;
+            }
             try {
                 peer.sendResult(result);
             } catch (IOException exception) {
@@ -354,9 +431,13 @@ final class LobbyHost implements AutoCloseable {
         broadcastAdvancement(new LobbyAdvancement(playerName, payload.titleKey(), payload.fallbackTitle()));
     }
 
-    private void broadcastAdvancement(LobbyAdvancement advancement) {
+    private synchronized void broadcastAdvancement(LobbyAdvancement advancement) {
         EvgeniumSpeedRun.LOGGER.info("Runner advancement: {} -> {}", advancement.playerName(), advancement.fallbackTitle());
-        for (Peer peer : peers) {
+        for (Participant participant : participants.values()) {
+            Peer peer = participant.peer;
+            if (peer == null) {
+                continue;
+            }
             try {
                 peer.sendAdvancement(advancement);
             } catch (IOException exception) {
@@ -366,11 +447,11 @@ final class LobbyHost implements AutoCloseable {
         advancementConsumer.accept(advancement);
     }
 
-    private LobbySnapshot snapshot() {
-        List<LobbyPlayer> players = new ArrayList<>(peers.size() + 1);
+    private synchronized LobbySnapshot snapshot() {
+        List<LobbyPlayer> players = new ArrayList<>(participants.size() + 1);
         players.add(hostPlayer);
-        for (Peer peer : peers) {
-            players.add(new LobbyPlayer(peer.playerName, false));
+        for (Participant participant : participants.values()) {
+            players.add(new LobbyPlayer(participant.playerName, false, participant.connected));
         }
         return new LobbySnapshot(players, cheatsEnabled, goal);
     }
@@ -379,10 +460,14 @@ final class LobbyHost implements AutoCloseable {
         snapshotConsumer.accept(snapshot());
     }
 
-    private void broadcastSnapshot() {
+    private synchronized void broadcastSnapshot() {
         LobbySnapshot snapshot = snapshot();
         snapshotConsumer.accept(snapshot);
-        for (Peer peer : peers) {
+        for (Participant participant : participants.values()) {
+            Peer peer = participant.peer;
+            if (peer == null) {
+                continue;
+            }
             try {
                 peer.send(snapshot);
             } catch (IOException exception) {
@@ -426,7 +511,7 @@ final class LobbyHost implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         running = false;
         if (serverSocket != null) {
             try {
@@ -434,10 +519,12 @@ final class LobbyHost implements AutoCloseable {
             } catch (IOException ignored) {
             }
         }
-        for (Peer peer : peers) {
-            closeQuietly(peer.socket);
+        for (Participant participant : participants.values()) {
+            if (participant.peer != null) {
+                closeQuietly(participant.peer.socket);
+            }
         }
-        peers.clear();
+        participants.clear();
         for (PendingTunnel pending : tunnels.values()) {
             closeQuietly(pending.source);
             pending.target.thenAccept(LobbyHost::closeQuietly);
@@ -454,16 +541,33 @@ final class LobbyHost implements AutoCloseable {
         }
     }
 
-    private static final class Peer {
+    private static final class Participant {
         private final String playerName;
+        private final String reconnectToken;
+        private volatile Peer peer;
+        private volatile boolean connected;
+        private volatile boolean ready;
+        private volatile long lastHeartbeatNano;
+
+        private Participant(String playerName, String reconnectToken) {
+            this.playerName = playerName;
+            this.reconnectToken = reconnectToken;
+        }
+    }
+
+    private static final class Peer {
+        private final Participant participant;
         private final Socket socket;
         private final DataOutputStream out;
-        private volatile boolean ready;
 
-        private Peer(String playerName, Socket socket, DataOutputStream out) {
-            this.playerName = playerName;
+        private Peer(Participant participant, Socket socket, DataOutputStream out) {
+            this.participant = participant;
             this.socket = socket;
             this.out = out;
+        }
+
+        private synchronized void sendSession(boolean reconnected) throws IOException {
+            LobbyProtocol.writeSession(out, participant.reconnectToken, reconnected);
         }
 
         private synchronized void send(LobbySnapshot snapshot) throws IOException {
@@ -472,6 +576,10 @@ final class LobbyHost implements AutoCloseable {
 
         private synchronized void sendRun(LobbyRunConfig config) throws IOException {
             LobbyProtocol.writeStartRun(out, config);
+        }
+
+        private synchronized void sendResume(LobbyResumeState state) throws IOException {
+            LobbyProtocol.writeResumeRun(out, state);
         }
 
         private synchronized void sendGo(long startAtEpochMillis) throws IOException {
@@ -488,6 +596,10 @@ final class LobbyHost implements AutoCloseable {
 
         private synchronized void sendOpenTunnel(long tunnelId) throws IOException {
             LobbyProtocol.writeOpenSpectatorTunnel(out, tunnelId);
+        }
+
+        private synchronized void sendPong(LobbyProtocol.PingPayload ping, long hostReceive, long hostSend) throws IOException {
+            LobbyProtocol.writePong(out, ping, hostReceive, hostSend);
         }
     }
 }
