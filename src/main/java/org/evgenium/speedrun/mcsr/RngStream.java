@@ -1,8 +1,10 @@
-package org.evgenium.speedrun.client.mcsr;
+package org.evgenium.speedrun.mcsr;
 
 /**
- * Independent competitive RNG domains. Gameplay hooks will consume only their own stream,
- * so unrelated random events can never shift another category's sequence.
+ * Independent deterministic RNG domains used by the competitive ruleset.
+ *
+ * A stream owns its own monotonically increasing event index. Consuming one stream must never
+ * move any other stream forward.
  */
 public enum RngStream {
     DEBUG,
