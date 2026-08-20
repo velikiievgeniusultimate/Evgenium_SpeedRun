@@ -1,14 +1,23 @@
 package org.evgenium.speedrun.client.mcsr;
 
+import net.minecraft.core.Holder;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.animal.chicken.Chicken;
+import net.minecraft.world.entity.animal.cow.Cow;
+import net.minecraft.world.entity.animal.cow.MushroomCow;
+import net.minecraft.world.entity.animal.golem.IronGolem;
+import net.minecraft.world.entity.animal.pig.Pig;
+import net.minecraft.world.entity.animal.rabbit.Rabbit;
+import net.minecraft.world.entity.animal.sheep.Sheep;
+import net.minecraft.world.entity.monster.Blaze;
+import net.minecraft.world.entity.monster.EnderMan;
+import net.minecraft.world.entity.monster.hoglin.Hoglin;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
-import net.minecraft.core.Holder;
 import net.minecraft.world.level.storage.loot.LootContext;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.level.storage.loot.providers.number.NumberProvider;
@@ -23,9 +32,8 @@ import java.util.WeakHashMap;
 
 /**
  * Competitive entity-drop bridge.
- *
  * One relevant entity death owns exactly one stream event. Base count and Looting are subdraws of
- * that same event, so using Looting can never move the next entity-drop index forward.
+ * that same event, so Looting can never move the next entity-drop index forward.
  */
 public final class EntityDropRngHooks {
     private static final Map<LootContext, DropSession> SESSIONS =
@@ -34,7 +42,6 @@ public final class EntityDropRngHooks {
     private EntityDropRngHooks() {
     }
 
-    /** Returns true when the vanilla SetItemCountFunction was fully replaced. */
     public static boolean trySetCount(ItemStack stack, LootContext context, NumberProvider count, boolean add) {
         if (!McsrRules.active() || stack == null || context == null || count == null) {
             return false;
@@ -45,8 +52,7 @@ public final class EntityDropRngHooks {
             return false;
         }
 
-        // MCSR rule: iron golems always yield exactly four iron. Poppies remain vanilla.
-        if (source.getType() == EntityType.IRON_GOLEM && stack.getItem() == Items.IRON_INGOT) {
+        if (source instanceof IronGolem && stack.getItem() == Items.IRON_INGOT) {
             int base = add ? stack.getCount() : 0;
             stack.setCount(base + 4);
             return true;
@@ -63,8 +69,6 @@ public final class EntityDropRngHooks {
         }
 
         if (!(count instanceof UniformGenerator uniform)) {
-            // Rabbit food uses a constant base count. Starting the session here still ensures the
-            // kill consumes exactly one FOOD_DROP event; vanilla may safely apply the constant.
             return false;
         }
 
@@ -75,18 +79,12 @@ public final class EntityDropRngHooks {
         }
 
         long raw = session.nextSubdraw();
-        int deterministic = min == max
-            ? min
-            : DeterministicRngCore.boundedInt(raw, min, max + 1);
+        int deterministic = min == max ? min : DeterministicRngCore.boundedInt(raw, min, max + 1);
         int base = add ? stack.getCount() : 0;
         stack.setCount(base + deterministic);
         return true;
     }
 
-    /**
-     * Returns an overridden ItemStack when the vanilla Looting function should be replaced.
-     * Empty means the original vanilla function must run unchanged.
-     */
     public static Optional<ItemStack> tryLooting(
         ItemStack stack,
         LootContext context,
@@ -104,11 +102,7 @@ public final class EntityDropRngHooks {
         }
 
         DropKind kind = classify(source, stack.getItem());
-        if (kind == null || !isRunnerAttributedKill(context)) {
-            return Optional.empty();
-        }
-
-        if (!(count instanceof UniformGenerator uniform)) {
+        if (kind == null || !isRunnerAttributedKill(context) || !(count instanceof UniformGenerator uniform)) {
             return Optional.empty();
         }
 
@@ -124,7 +118,6 @@ public final class EntityDropRngHooks {
 
         int level = EnchantmentHelper.getEnchantmentLevel(enchantment, livingKiller);
         if (level == 0) {
-            // The outer entity event is still consumed, but no subdraw is needed for Looting 0.
             return Optional.of(stack);
         }
 
@@ -135,11 +128,8 @@ public final class EntityDropRngHooks {
         }
 
         long raw = session.nextSubdraw();
-        float roll = min == max
-            ? min
-            : min + (max - min) * DeterministicRngCore.unitFloat(raw);
-        float addition = level * roll;
-        stack.grow(Math.round(addition));
+        float roll = min == max ? min : min + (max - min) * DeterministicRngCore.unitFloat(raw);
+        stack.grow(Math.round(level * roll));
         if (limit > 0) {
             stack.limitSize(limit);
         }
@@ -147,9 +137,6 @@ public final class EntityDropRngHooks {
     }
 
     private static boolean isRunnerAttributedKill(LootContext context) {
-        // This excludes environmental/other-entity deaths and spectator activity from consuming
-        // the runner's competitive sequence. Fire Aspect and indirect kills still retain player
-        // attribution through LAST_DAMAGE_PLAYER.
         return context.getOptionalParameter(LootContextParams.LAST_DAMAGE_PLAYER) != null;
     }
 
@@ -175,39 +162,31 @@ public final class EntityDropRngHooks {
     }
 
     private static DropKind classify(Entity entity, Item item) {
-        EntityType<?> type = entity.getType();
-
-        if (type == EntityType.BLAZE && item == Items.BLAZE_ROD) {
+        if (entity instanceof Blaze && item == Items.BLAZE_ROD) {
             return DropKind.BLAZE;
         }
-        if (type == EntityType.ENDERMAN && item == Items.ENDER_PEARL) {
-            // One global Enderman sequence across all dimensions, matching Ranked's documented
-            // entity-drop category rather than creating dimension-specific streams.
+        if (entity instanceof EnderMan && item == Items.ENDER_PEARL) {
             return DropKind.ENDERMAN;
         }
-
-        if (isFoodDrop(type, item)) {
-            return DropKind.FOOD;
-        }
-        return null;
+        return isFoodDrop(entity, item) ? DropKind.FOOD : null;
     }
 
-    private static boolean isFoodDrop(EntityType<?> type, Item item) {
-        if ((type == EntityType.COW || type == EntityType.MOOSHROOM)
+    private static boolean isFoodDrop(Entity entity, Item item) {
+        if ((entity instanceof Cow || entity instanceof MushroomCow)
             && (item == Items.BEEF || item == Items.COOKED_BEEF)) {
             return true;
         }
-        if ((type == EntityType.PIG || type == EntityType.HOGLIN)
+        if ((entity instanceof Pig || entity instanceof Hoglin)
             && (item == Items.PORKCHOP || item == Items.COOKED_PORKCHOP)) {
             return true;
         }
-        if (type == EntityType.SHEEP && (item == Items.MUTTON || item == Items.COOKED_MUTTON)) {
+        if (entity instanceof Sheep && (item == Items.MUTTON || item == Items.COOKED_MUTTON)) {
             return true;
         }
-        if (type == EntityType.CHICKEN && (item == Items.CHICKEN || item == Items.COOKED_CHICKEN)) {
+        if (entity instanceof Chicken && (item == Items.CHICKEN || item == Items.COOKED_CHICKEN)) {
             return true;
         }
-        return type == EntityType.RABBIT && (item == Items.RABBIT || item == Items.COOKED_RABBIT);
+        return entity instanceof Rabbit && (item == Items.RABBIT || item == Items.COOKED_RABBIT);
     }
 
     private enum DropKind {
@@ -216,10 +195,7 @@ public final class EntityDropRngHooks {
         FOOD(RngStream.FOOD_DROP);
 
         private final RngStream stream;
-
-        DropKind(RngStream stream) {
-            this.stream = stream;
-        }
+        DropKind(RngStream stream) { this.stream = stream; }
     }
 
     private static final class DropSession {
