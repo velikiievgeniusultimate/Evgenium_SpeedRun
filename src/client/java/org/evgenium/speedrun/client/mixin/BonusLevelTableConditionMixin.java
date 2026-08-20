@@ -4,6 +4,7 @@ import net.minecraft.core.Holder;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.level.storage.loot.LootContext;
 import net.minecraft.world.level.storage.loot.predicates.BonusLevelTableCondition;
+import org.evgenium.speedrun.client.mcsr.AppleRngHooks;
 import org.evgenium.speedrun.client.mcsr.FlintRngHooks;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -21,13 +22,16 @@ public abstract class BonusLevelTableConditionMixin {
     @Shadow @Final private List<Float> values;
 
     /**
-     * Gravel's vanilla loot table reaches this condition only after the Silk Touch alternative has
-     * failed. In MCSR Like we keep the exact vanilla Fortune chance table but source the final roll
-     * from the independent FLINT stream. In Vanilla mode this injection is a complete no-op.
+     * Replaces only explicitly-scoped vanilla block-drop rolls. Each hook returns empty when the
+     * current loot context is not its exact target or when MCSR Like is disabled, allowing vanilla
+     * BonusLevelTableCondition.test to continue untouched.
      */
     @Inject(method = "test", at = @At("HEAD"), cancellable = true)
-    private void evgenium$competitiveGravelFlint(LootContext context, CallbackInfoReturnable<Boolean> cir) {
+    private void evgenium$competitiveBlockDropRolls(LootContext context, CallbackInfoReturnable<Boolean> cir) {
         Optional<Boolean> competitive = FlintRngHooks.tryRoll(context, this.enchantment, this.values);
+        if (competitive.isEmpty()) {
+            competitive = AppleRngHooks.tryRoll(context, this.enchantment, this.values);
+        }
         competitive.ifPresent(cir::setReturnValue);
     }
 }

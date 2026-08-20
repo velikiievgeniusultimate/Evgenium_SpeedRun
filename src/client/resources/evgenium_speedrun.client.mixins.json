@@ -9,6 +9,7 @@
     "PlayerAdvancementsMixin",
     "ServerLoginPacketListenerMixin",
     "TitleScreenMixin",
+    "UniformGeneratorMixin",
     "VanillaRaceChatMixin"
   ],
   "injectors": {
